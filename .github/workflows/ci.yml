@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://routewrangler:routewrangler@localhost:5432/routewrangler
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: routewrangler
+          POSTGRES_PASSWORD: routewrangler
+          POSTGRES_DB: routewrangler
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U routewrangler -d routewrangler"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (topological — builds contracts first)
+        run: pnpm -r build
+
+      - name: Lint
+        run: pnpm -r lint
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Unit + integration tests
+        run: pnpm -r test
+
+      - name: Apply migrations against a real Postgres
+        run: pnpm db:migrate
+
+      - name: Migration consistency check
+        run: pnpm db:check

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: routewrangler-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: routewrangler
+      POSTGRES_PASSWORD: routewrangler
+      POSTGRES_DB: routewrangler
+    ports:
+      - "5432:5432"
+    volumes:
+      - routewrangler-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U routewrangler -d routewrangler"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  routewrangler-pgdata:

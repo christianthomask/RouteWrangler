@@ -1,0 +1,8 @@
+/**
+ * @routewrangler/contracts — the single source of request/response truth
+ * (BUILD_SPEC §3, §9). Every API request/response type is a Zod schema here;
+ * the API validates against these and the web app imports the inferred types.
+ */
+export * from './roles';
+export * from './auth';
+export * from './health';

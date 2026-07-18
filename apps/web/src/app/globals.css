@@ -1,0 +1,92 @@
+/*
+ * Placeholder design tokens. The Design workstream (DESIGN_BRIEF, Sprint 0)
+ * owns the real palette, type scale, and component inventory; these exist only
+ * so the skeleton renders coherently until the token contract lands.
+ */
+:root {
+  --rw-bg: #0f1720;
+  --rw-surface: #16212e;
+  --rw-surface-2: #1e2c3c;
+  --rw-border: #2b3d52;
+  --rw-text: #e8eef5;
+  --rw-text-muted: #9fb0c3;
+  --rw-accent: #2f9e8f;
+  --rw-accent-strong: #24bfa8;
+  --rw-danger: #e05b5b;
+  --rw-radius: 10px;
+  --rw-font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--rw-bg);
+  color: var(--rw-text);
+  font-family: var(--rw-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--rw-accent-strong);
+}
+
+.rw-card {
+  background: var(--rw-surface);
+  border: 1px solid var(--rw-border);
+  border-radius: var(--rw-radius);
+  padding: 1.5rem;
+}
+
+.rw-input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: var(--rw-surface-2);
+  border: 1px solid var(--rw-border);
+  border-radius: 8px;
+  color: var(--rw-text);
+  font-size: 0.95rem;
+}
+
+.rw-button {
+  width: 100%;
+  padding: 0.65rem 1rem;
+  background: var(--rw-accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rw-button:hover {
+  background: var(--rw-accent-strong);
+}
+
+.rw-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rw-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--rw-text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.rw-badge {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: var(--rw-surface-2);
+  border: 1px solid var(--rw-border);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
