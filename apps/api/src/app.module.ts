@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { EnvModule } from './config/env.module';
 import { DbModule } from './db/db.module';
+import { StorageModule } from './storage/storage.module';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { UsersModule } from './users/users.module';
@@ -13,6 +14,7 @@ import { PhotosModule } from './photos/photos.module';
   imports: [
     EnvModule,
     DbModule,
+    StorageModule,
     AuthModule,
     TaxonomyModule,
     HealthModule,

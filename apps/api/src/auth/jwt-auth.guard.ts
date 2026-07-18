@@ -14,7 +14,7 @@ import type { Database } from '../db/client';
 import { users } from '../db/schema';
 import { ENV } from '../config/env.module';
 import type { Env } from '../config/env';
-import { CognitoVerifier } from './cognito-verifier';
+import type { TokenVerifier } from './token-verifier';
 import { VERIFIER } from './verifier.provider';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import type { AuthUser } from './current-user';
@@ -31,7 +31,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     @Inject(DB) private readonly db: Database,
     @Inject(ENV) private readonly env: Env,
-    @Inject(VERIFIER) private readonly verifier: CognitoVerifier | null,
+    @Inject(VERIFIER) private readonly verifier: TokenVerifier | null,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

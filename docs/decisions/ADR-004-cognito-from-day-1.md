@@ -1,6 +1,8 @@
 # ADR-004 — Cognito auth from day 1
 
-Status: Accepted (Sprint 0)
+Status: Accepted (Sprint 0). **Amended by ADR-015** — generalized to OIDC day 1
+(Cognito is the default adapter; Entra/generic are a config change). The
+verify-JWKS-then-load-local-user pattern is unchanged.
 
 ## Context
 

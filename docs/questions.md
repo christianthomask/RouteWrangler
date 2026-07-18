@@ -37,6 +37,24 @@ Format: `[status] question — context / who owns it`.
       domain-blessed — confirm with CTK/Jeramehl against real reading data.
       Per-client overrides remain deferred (Nice §12.4). — *owner: CTK*
 
+## Cloud portability pivot (ADR-015)
+
+- [ ] **Production cloud target undecided.** AWS card verification was blocked;
+      the app is now provider-agnostic (ports & adapters) and runs fully local.
+      Decide the prod target (AWS / Azure / other) when a payment method
+      verifies. **Note:** Azure sign-up also requires a verifiable card — confirm
+      before committing to Azure. — *owner: CTK*
+- [ ] **Azure Blob adapter unverified.** Implemented to the SAS contract but not
+      yet run against a live Azure account. Verify (or delete) once an Azure
+      account exists. The S3/MinIO path is verified end to end. — *owner: Dev*
+- [ ] **IaC tool choice.** Deployment is now the main provider-specific artifact.
+      Pick Terraform (one tool, multi-cloud) vs per-cloud (CDK for AWS / Bicep
+      for Azure) when the prod target is chosen. — *owner: Dev → CTK*
+- [ ] **DB scale-to-zero on non-AWS.** Aurora Serverless v2 scale-to-zero was the
+      idle-cost lever. Azure PG Flexible Server can stop but not true
+      scale-to-zero; Neon offers scale-to-zero if we want it provider-independent.
+      Revisit with the target decision. — *owner: CTK*
+
 ## Sprint 1 (raised, non-blocking)
 
 - [ ] **Cycle model.** `route_runs.cycle_id` is a `YYYY-MM` string in the seed;

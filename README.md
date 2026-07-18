@@ -38,7 +38,7 @@ Prereqs: **Node 22, pnpm 10, Docker**.
 ```bash
 cp .env.example .env
 pnpm install
-pnpm db:up          # docker-compose Postgres
+pnpm db:up          # docker-compose Postgres + MinIO (+ bucket)
 pnpm db:migrate     # apply checked-in Drizzle migrations
 pnpm seed           # users + taxonomy + world + 12-month history + demo run
 pnpm dev            # API on :3001
@@ -57,11 +57,14 @@ SIM_READER_SUB='local-only:reader1' pnpm --filter @routewrangler/simulator playb
 You'll watch validated reads land and typed exceptions open — one per validation
 rule — with no UI. *"The pipeline works end to end with no UI."*
 
-**One labeled cloud dependency:** auth uses a real **dev Cognito user pool** —
-there is no official local Cognito emulator (ADR-004). Before the pool is
-provisioned (`docs/runbook.md`), authenticated endpoints return a labeled `503`
-and the seed runs in local-only mode. This is the pre-provisioning skeleton
-state, and it is honest about it.
+**Runs with zero cloud signup.** The cloud is a config choice, not a code
+dependency (ADR-015): auth, object storage, and the database each sit behind a
+port, selected by `AUTH_PROVIDER` / `STORAGE_PROVIDER` / `DATABASE_URL`. The
+default `.env` runs everything locally — docker Postgres, **MinIO** (S3-compatible
+storage, identical presign flow to AWS S3), and the dev-auth shim (ADR-012,
+hard-disabled in production). Point the same build at **AWS** (Cognito · Aurora ·
+S3) or **Azure** (Entra · Azure PG · Blob) later by changing config only — see
+the portability map in `docs/runbook.md`.
 
 ## What works today
 
@@ -90,7 +93,13 @@ state, and it is honest about it.
   public API (zero privileged access), with an anomaly matrix that trips every
   rule. The seed backfills 12 months of history and stages today's demo run.
 - Vitest: every anomaly asserts its exception, idempotency (DB-backed), rollover
-  math, deterministic generation — 37 tests.
+  math, deterministic generation, storage adapters — 42 tests.
+
+**Cloud portability (ADR-015)**
+- Auth and object storage sit behind ports (`TokenVerifier`, `StoragePort`);
+  Postgres + container are already neutral. Provider by config: auth
+  Cognito/Entra/OIDC, storage S3(/MinIO)/Azure Blob. The whole system runs
+  locally with **no cloud vendor**; prod target (AWS/Azure) is a config change.
 
 **Sprint 0 demo:** prod URL → branded login → authenticated hello with role.
 *"It's deployed, it's real auth, it has a name."*
@@ -100,10 +109,12 @@ in the database. *"The pipeline works end to end with no UI."*
 
 ## Production path
 
-Deployment is manual and documented step-by-step in
-[`docs/runbook.md`](./docs/runbook.md) (App Runner · Aurora Serverless v2 ·
-S3 · Cognito · Vercel). IaC is deferred and labeled (Nice queue, BUILD_SPEC
-§12). Decisions are logged in [`docs/decisions/`](./docs/decisions/).
+The cloud target is a **config choice, not a rewrite** (ADR-015). Deployment
+steps for both targets are in [`docs/runbook.md`](./docs/runbook.md) — AWS
+(Cognito · Aurora Serverless v2 · S3 · App Runner) or Azure (Entra · Azure PG ·
+Blob · Container Apps), plus the local MinIO stack. IaC is deferred and labeled
+(Nice queue, BUILD_SPEC §12). Decisions are logged in
+[`docs/decisions/`](./docs/decisions/).
 
 ## Where things go next
 

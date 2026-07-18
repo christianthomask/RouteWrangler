@@ -1,32 +1,52 @@
 # RouteWrangler — Runbook
 
-Operational steps for provisioning and running RouteWrangler. IaC is deferred
-(Nice queue §12) — provisioning is manual and documented here, step by step.
+Operational steps for running and provisioning RouteWrangler. **The cloud target
+is a config choice, not a code change (ADR-015):** the app runs against AWS,
+Azure, or a fully local stack by setting `AUTH_PROVIDER` / `STORAGE_PROVIDER` and
+`DATABASE_URL`. IaC is deferred (Nice queue §12); provisioning below is manual
+and documented step by step.
+
+## Portability map (ADR-015)
+
+| Concern | Neutral core | AWS target | Azure target | Local |
+| --- | --- | --- | --- | --- |
+| API | container | App Runner | Container Apps | `pnpm dev` |
+| DB | Postgres (`DATABASE_URL`) | Aurora Serverless v2 | Azure DB for PostgreSQL | docker Postgres |
+| Storage | `StoragePort` | S3 | Azure Blob | MinIO (S3-compatible) |
+| Auth | OIDC `TokenVerifier` | Cognito | Entra External ID | dev-auth shim |
 
 ---
 
-## 0. Local development
+## 0. Local development — zero cloud signup
 
 Prereqs: Node 22, pnpm 10, Docker.
 
 ```bash
-cp .env.example .env
+cp .env.example .env          # defaults: local Postgres + MinIO + dev auth
 pnpm install
-pnpm db:up            # docker-compose Postgres
-pnpm db:migrate       # apply checked-in Drizzle migrations
-pnpm seed             # LOCAL-ONLY mode until a Cognito pool is configured
-pnpm dev              # NestJS API on :3001
+pnpm db:up                    # docker-compose Postgres + MinIO (+ bucket)
+pnpm db:migrate               # apply checked-in Drizzle migrations
+pnpm seed                     # users + taxonomy + world + history + demo run
+pnpm dev                      # NestJS API on :3001
 # in another shell:
 pnpm --filter @routewrangler/web dev   # Next.js on :3000
 ```
 
-**One labeled cloud dependency:** auth talks to a real **dev Cognito user
-pool** — there is no official local Cognito emulator (ADR-004). Until the pool
-is provisioned and `.env` is filled in:
+The default `.env` runs the **entire system with no cloud vendor** (ADR-015):
 
-- the API boots, but authenticated endpoints return a labeled **503**;
-- `pnpm seed` runs in **local-only** mode (Postgres rows only, `local-only:`
-  subs) so the rest of the stack is exercisable.
+- **Auth:** `AUTH_DEV_BYPASS=true` — the API trusts an `x-dev-user-sub` header
+  (ADR-012, hard-disabled in production). No IdP needed. `pnpm seed` runs in
+  **local-only** mode (Postgres rows, `local-only:` subs).
+- **Storage:** `STORAGE_PROVIDER=s3` pointed at **MinIO** (`S3_ENDPOINT=
+  http://localhost:9000`) — the same S3 adapter used for AWS, identical presign
+  flow. MinIO console at http://localhost:9001 (minioadmin/minioadmin).
+- **DB:** docker Postgres via `DATABASE_URL`.
+
+Run the headless pipeline end to end:
+
+```bash
+SIM_READER_SUB='local-only:reader1' pnpm --filter @routewrangler/simulator playback
+```
 
 ---
 
@@ -83,6 +103,30 @@ environment's secret store; never commit them.
 ### 2.5 Vercel (web)
 1. Import `apps/web`. Set `NEXT_PUBLIC_API_BASE_URL` and `NEXT_PUBLIC_COGNITO_*`.
 2. Deploy; verify the branded login renders and `/me` round-trips.
+
+---
+
+## 2b. Provisioning — Azure target (ADR-015)
+
+Same app, different provider config. Verify Azure pricing before provisioning
+(free account: $200/30-day credit + 12-month free tiers; Container Apps consumption
+scales to zero). **Note:** Azure sign-up also requires a verifiable card.
+
+1. **Auth — Microsoft Entra External ID** (CIAM). Create a tenant + app
+   registration; map app roles `reader`/`supervisor`/`admin`. Set
+   `AUTH_PROVIDER=entra`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`. (Issuer/JWKS are
+   derived automatically.)
+2. **DB — Azure Database for PostgreSQL Flexible Server.** Create; set
+   `DATABASE_URL`; `pnpm db:migrate`.
+3. **Storage — Azure Blob.** Create a storage account + a `photos` container.
+   Set `STORAGE_PROVIDER=azure_blob`, `AZURE_STORAGE_ACCOUNT`,
+   `AZURE_STORAGE_CONTAINER`, `AZURE_STORAGE_ACCOUNT_KEY`. ⚠️ The Blob adapter is
+   implemented but **not yet verified against a live account** (docs/questions.md).
+4. **API — Azure Container Apps.** Deploy the `apps/api` container; env from a
+   Key Vault / secret store; ingress health probe `/health`; consumption plan
+   (scale-to-zero).
+5. **Web — Vercel or Azure Static Web Apps.** Set `NEXT_PUBLIC_API_BASE_URL` and
+   the Entra client config.
 
 ---
 

@@ -1,9 +1,6 @@
-import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Inject, Injectable } from '@nestjs/common';
 import type { PresignRequest, PresignResponse } from '@routewrangler/contracts';
-import { ENV } from '../config/env.module';
-import type { Env } from '../config/env';
+import { STORAGE, type StoragePort } from '../storage/storage.port';
 
 const EXPIRES_SECONDS = 900;
 
@@ -15,39 +12,29 @@ const EXT_BY_TYPE: Record<string, string> = {
 };
 
 /**
- * Presigned S3 upload for a read's photo (BUILD_SPEC §7.1). The key is derived
+ * Presigned upload for a read's photo (BUILD_SPEC §7.1). The key is derived
  * deterministically from the immutable event id — the row is never mutated, so
  * immutability (ADR-002) holds even though the binary attaches async (ADR-013).
- * Real presigning via the S3 SDK; a labeled 503 until the bucket is provisioned.
+ * Storage is a port (ADR-015): S3/MinIO or Azure Blob, chosen by config; this
+ * service is provider-agnostic.
  */
 @Injectable()
 export class PhotosService {
-  constructor(@Inject(ENV) private readonly env: Env) {}
+  constructor(@Inject(STORAGE) private readonly storage: StoragePort) {}
 
   async presign(req: PresignRequest): Promise<PresignResponse> {
-    if (!this.env.S3_BUCKET) {
-      throw new ServiceUnavailableException(
-        'S3 not configured — provision the photos bucket (see docs/runbook.md)',
-      );
-    }
-
     const ext = EXT_BY_TYPE[req.contentType] ?? 'bin';
     const photoKey = `photos/${req.readEventId}.${ext}`;
 
-    const client = new S3Client({ region: this.env.AWS_REGION });
-    const command = new PutObjectCommand({
-      Bucket: this.env.S3_BUCKET,
-      Key: photoKey,
-      ContentType: req.contentType,
-    });
-    const uploadUrl = await getSignedUrl(client, command, { expiresIn: EXPIRES_SECONDS });
+    // NullStorage throws a labeled 503 here when nothing is configured.
+    const upload = await this.storage.presignUpload(photoKey, req.contentType, EXPIRES_SECONDS);
 
     return {
-      method: 'PUT',
-      uploadUrl,
+      method: upload.method,
+      uploadUrl: upload.uploadUrl,
       photoKey,
-      headers: { 'Content-Type': req.contentType },
-      expiresInSeconds: EXPIRES_SECONDS,
+      headers: upload.headers,
+      expiresInSeconds: upload.expiresInSeconds,
     };
   }
 }

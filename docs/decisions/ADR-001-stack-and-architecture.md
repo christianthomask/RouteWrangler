@@ -1,6 +1,7 @@
 # ADR-001 — Stack and architecture
 
-Status: Accepted (Sprint 0)
+Status: Accepted (Sprint 0). **Amended by ADR-015** — compute (container) and DB
+(Postgres) are portable; App Runner/Aurora are one target, not a hard dependency.
 
 ## Context
 

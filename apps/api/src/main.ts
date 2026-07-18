@@ -17,8 +17,12 @@ async function bootstrap() {
 
   const logger = new Logger('bootstrap');
   logger.log(`routewrangler-api listening on :${env.PORT}`);
-  if (!env.authConfigured) {
-    logger.warn('Cognito not configured — authenticated endpoints return 503 (see docs/runbook.md)');
+  logger.log(`auth provider: ${env.AUTH_PROVIDER} (${env.authConfigured ? 'configured' : 'unconfigured'})`);
+  if (!env.authConfigured && !env.authDevBypass) {
+    logger.warn('auth not configured — authenticated endpoints return 503 (see docs/runbook.md)');
+  }
+  if (env.authDevBypass) {
+    logger.warn('AUTH_DEV_BYPASS active — trusting x-dev-user-sub (local only, never prod)');
   }
 }
 
