@@ -40,10 +40,22 @@ cp .env.example .env
 pnpm install
 pnpm db:up          # docker-compose Postgres
 pnpm db:migrate     # apply checked-in Drizzle migrations
-pnpm seed           # seed users (LOCAL-ONLY until a Cognito pool is configured)
+pnpm seed           # users + taxonomy + world + 12-month history + demo run
 pnpm dev            # API on :3001
 pnpm --filter @routewrangler/web dev   # web on :3000
 ```
+
+### The headless pipeline demo (Sprint 1)
+
+With the API running and `AUTH_DEV_BYPASS=true` in `.env` (local-only shim,
+ADR-012), run the simulator against the public ingestion API:
+
+```bash
+SIM_READER_SUB='local-only:reader1' pnpm --filter @routewrangler/simulator playback
+```
+
+You'll watch validated reads land and typed exceptions open — one per validation
+rule — with no UI. *"The pipeline works end to end with no UI."*
 
 **One labeled cloud dependency:** auth uses a real **dev Cognito user pool** —
 there is no official local Cognito emulator (ADR-004). Before the pool is
@@ -51,22 +63,40 @@ provisioned (`docs/runbook.md`), authenticated endpoints return a labeled `503`
 and the seed runs in local-only mode. This is the pre-provisioning skeleton
 state, and it is honest about it.
 
-## What works today (Sprint 0 — walking skeleton)
+## What works today
 
+**Sprint 0 — walking skeleton**
 - Monorepo scaffold, shared Zod contracts, CI (build · lint · typecheck · test ·
   migrate · migration-check).
 - NestJS API with a **real JWKS-based JWT guard** (Cognito), server-side role
   enforcement, `/health`, and the `/me` authenticated-hello endpoint.
-- Drizzle schema + migration for `users`; seed that creates **both halves**
-  (Cognito pool user + linked local row), with a labeled local-only fallback.
+- Seed that creates **both halves** (Cognito pool user + linked local row), with
+  a labeled local-only fallback.
 - Next.js app: branded login and role-gated `/field`, `/supervisor`, `/admin`
   shells that display the authenticated role.
-- Seven accepted ADRs; runbook (incl. the pricing-verification task); open
-  questions log.
 
-**Sprint 0 demo:** prod URL → branded login → sign in as the seeded supervisor
-→ authenticated hello with role. *"It's deployed, it's real auth, it has a
-name."*
+**Sprint 1 — the headless core**
+- Full schema + migrations (clients, meters, routes, runs, immutable
+  read_events, exceptions, taxonomy lookups, exports, audit).
+- **One public ingestion API** — `POST /ingest/read-events`: idempotent on the
+  client-generated event id, single or batch, per-event statuses.
+- **Validation rule registry** — one module per exception type: hi/lo vs the
+  meter's own 12-month baseline, leak-spike, negative consumption, rollover
+  (in-band annotate / out-of-band exception), zero-consumption streak,
+  location-absent, duplicate-mismatch. Passing reads marked billable.
+- `POST /photos/presign` (real S3, labeled 503 until provisioned), `GET
+  /taxonomy`, minimal `GET /runs`.
+- **Simulator** — deterministic seasonal generation + playback through the
+  public API (zero privileged access), with an anomaly matrix that trips every
+  rule. The seed backfills 12 months of history and stages today's demo run.
+- Vitest: every anomaly asserts its exception, idempotency (DB-backed), rollover
+  math, deterministic generation — 37 tests.
+
+**Sprint 0 demo:** prod URL → branded login → authenticated hello with role.
+*"It's deployed, it's real auth, it has a name."*
+
+**Sprint 1 demo:** simulator → public API → validated reads + typed exceptions
+in the database. *"The pipeline works end to end with no UI."*
 
 ## Production path
 

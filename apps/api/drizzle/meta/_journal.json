@@ -8,6 +8,13 @@
       "when": 1784346965472,
       "tag": "0000_many_malcolm_colcord",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784347933613,
+      "tag": "0001_curvy_stryfe",
+      "breakpoints": true
     }
   ]
 }

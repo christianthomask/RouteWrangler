@@ -2,18 +2,18 @@
  * @routewrangler/simulator — the route simulator.
  *
  * NON-NEGOTIABLE (BUILD_SPEC §2.1): the simulator is provably just another API
- * client. It talks ONLY to the public ingestion API with reader credentials and
- * has zero privileged access — no imports from `@routewrangler/api`, no DB
- * handle. That boundary is enforced by this package's dependency list.
+ * client. This package depends only on `@routewrangler/contracts` — never on
+ * `@routewrangler/api`, no DB handle. Its two responsibilities:
  *
- * Sprint 0 ships this skeleton. Sprint 1 implements:
- *   - seed mode:     3 clients, config-driven scale, 12-month seasonal history
- *   - playback mode: replay a route in accelerated time via POST /ingest/read-events
- *   - anomaly injection matrix (every validation rule tripped ≥ once)
- *   - the named demo seed (BUILD_SPEC §7.6, §10)
+ *   - generation logic (pure, deterministic): seasonal curves + anomaly matrix,
+ *     reused by the API seed to backfill 12 months of baseline history.
+ *   - playback: replay a route through the PUBLIC ingestion API (HTTP only).
  */
+export * from './generate';
+export * from './anomalies';
+export * from './playback';
 
-/** Placeholder config surface — scale numbers are config, not code (§7.6). */
+/** Config surface — scale numbers are config, not code (§7.6). */
 export interface SimulatorConfig {
   apiBaseUrl: string;
   clients: number;

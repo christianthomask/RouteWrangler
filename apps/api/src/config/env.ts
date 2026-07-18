@@ -16,6 +16,15 @@ const EnvSchema = z.object({
   COGNITO_CLIENT_ID: z.string().optional(),
   COGNITO_ISSUER: z.string().url().optional(),
   COGNITO_JWKS_URI: z.string().url().optional(),
+
+  /** Local-only auth shim (ADR-012). Never takes effect in production. */
+  AUTH_DEV_BYPASS: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
+  /** S3 bucket for photo/export presigning (BUILD_SPEC §3). */
+  S3_BUCKET: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema> & {
@@ -25,6 +34,8 @@ export type Env = z.infer<typeof EnvSchema> & {
   cognitoJwksUri?: string;
   /** True only when enough Cognito config is present to verify tokens. */
   authConfigured: boolean;
+  /** True when the local dev auth shim is active (never in production). */
+  authDevBypass: boolean;
 };
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
@@ -44,5 +55,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     cognitoIssuer: derivedIssuer,
     cognitoJwksUri: derivedJwks,
     authConfigured: Boolean(derivedIssuer && derivedJwks),
+    authDevBypass: parsed.AUTH_DEV_BYPASS && parsed.NODE_ENV !== 'production',
   };
 }

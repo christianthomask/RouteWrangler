@@ -15,3 +15,10 @@ sprint that makes a non-obvious choice adds one.
 | [005](./ADR-005-split-invariant.md) | The split invariant |
 | [006](./ADR-006-no-consumption-estimation.md) | No consumption estimation |
 | [007](./ADR-007-staff-see-all-clients.md) | Staff see all clients; client switcher is a view filter |
+| [008](./ADR-008-idempotent-ingestion.md) | Idempotent ingestion on a client-generated event id |
+| [009](./ADR-009-billable-rule.md) | What makes a read billable (blocksBilling) |
+| [010](./ADR-010-baseline-computation.md) | Consumption baseline computation |
+| [011](./ADR-011-decrease-classification.md) | Classifying a decreasing read: rollover vs negative |
+| [012](./ADR-012-local-dev-auth-bypass.md) | Local-only dev auth bypass |
+| [013](./ADR-013-photo-key-derived.md) | Photo key is derived, not mutated onto the read |
+| [014](./ADR-014-simulator-boundary.md) | Simulator boundary: shared generation, public-only pipeline |

@@ -52,11 +52,12 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
 
-      - name: Unit + integration tests
-        run: pnpm -r test
-
       - name: Apply migrations against a real Postgres
         run: pnpm db:migrate
 
       - name: Migration consistency check
         run: pnpm db:check
+
+      # Runs after migrate so the DB-backed integration tests have their schema.
+      - name: Unit + integration tests
+        run: pnpm -r test
