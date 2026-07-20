@@ -117,6 +117,50 @@ environment's secret store; never commit them.
 
 ---
 
+## 2a. Deploy — Cloudflare target (ADR-019)
+
+Deploys run in **GitHub Actions** (`.github/workflows/deploy.yml`, manual
+`workflow_dispatch`) or from a local Claude Code instance with `wrangler login` —
+never from the remote Claude Code session (it can't reach Cloudflare).
+
+### One-time provisioning (from local CC or the Cloudflare dashboard)
+1. **Neon** — create a Postgres project; copy the direct (non-pooled) connection
+   string → this is `DATABASE_URL`.
+2. **R2** — `wrangler r2 bucket create verameter-photos`; create an R2 API token
+   (access key id + secret).
+3. **Clerk** — create an application; note the **publishable key** and the
+   **issuer** (`https://<slug>.clerk.accounts.dev`).
+4. **Cloudflare API token** — with Workers Scripts + Containers + R2 edit perms;
+   note it and your **account id**.
+
+### GitHub secrets & variables (repo → Settings)
+Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DATABASE_URL`.
+Variables: `NEXT_PUBLIC_API_BASE_URL` (the deployed API URL),
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+
+### API container runtime secrets/vars (set once via wrangler, from `apps/api`)
+```bash
+wrangler secret put DATABASE_URL           # Neon direct connection string
+wrangler secret put S3_ACCESS_KEY_ID       # R2 access key id
+wrangler secret put S3_SECRET_ACCESS_KEY   # R2 secret
+```
+Non-secret vars (add to `apps/api/wrangler.jsonc` `vars`, or the dashboard):
+`AUTH_PROVIDER=oidc`, `OIDC_ISSUER=<clerk issuer>`, `STORAGE_PROVIDER=s3`,
+`S3_BUCKET=verameter-photos`,
+`S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com`,
+`S3_FORCE_PATH_STYLE=true`, `AWS_REGION=auto`, `NODE_ENV=production`.
+
+### Deploy
+Trigger the **Deploy (Cloudflare)** workflow. It: applies migrations to Neon →
+builds the web app with OpenNext and `wrangler deploy` (Worker) → builds/pushes
+the API image and deploys the container Worker.
+
+> **Beta caveat (ADR-019):** Cloudflare Containers is beta and this path is
+> unverified. If it misbehaves, host the root `Dockerfile` image on **Fly/Render**
+> and point `NEXT_PUBLIC_API_BASE_URL` at it — Cloudflare still serves web + R2.
+
+---
+
 ## 2b. Provisioning — Azure target (ADR-015)
 
 Same app, different provider config. Verify Azure pricing before provisioning

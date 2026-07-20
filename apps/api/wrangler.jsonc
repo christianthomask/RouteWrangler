@@ -1,0 +1,28 @@
+{
+  // NestJS API on Cloudflare Containers (ADR-019). `wrangler deploy` builds +
+  // pushes the root Dockerfile image and deploys the container Worker.
+  // BETA / unverified — see worker/index.ts and docs/runbook.md.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "verameter-api",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "containers": [
+    {
+      "class_name": "ApiContainer",
+      "image": "../../Dockerfile",
+      "instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "API_CONTAINER", "class_name": "ApiContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer"] }],
+  "observability": { "enabled": true }
+  // Runtime config is set as secrets/vars, NOT here:
+  //   wrangler secret put DATABASE_URL          (Neon direct connection string)
+  //   wrangler secret put S3_ACCESS_KEY_ID      (R2 access key)
+  //   wrangler secret put S3_SECRET_ACCESS_KEY  (R2 secret)
+  //   vars: AUTH_PROVIDER=oidc, OIDC_ISSUER (Clerk), STORAGE_PROVIDER=s3,
+  //         S3_BUCKET, S3_ENDPOINT (R2), S3_FORCE_PATH_STYLE=true, AWS_REGION=auto
+}

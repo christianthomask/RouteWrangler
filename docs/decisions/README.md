@@ -26,3 +26,4 @@ sprint that makes a non-obvious choice adds one.
 | [016](./ADR-016-design-tokens-and-status-colors.md) | Design tokens & colorblind-safe status colors (design) |
 | [017](./ADR-017-product-name.md) | Product name: Verameter (provisional, design) |
 | [018](./ADR-018-mobile-first-console.md) | Mobile-first for all surfaces incl. supervisor/admin (design; overrides brief) |
+| [019](./ADR-019-cloudflare-deploy.md) | Cloudflare deployment via GitHub Actions (web=Workers/OpenNext, api=Containers) |
