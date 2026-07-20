@@ -24,4 +24,4 @@ sprint that makes a non-obvious choice adds one.
 | [014](./ADR-014-simulator-boundary.md) | Simulator boundary: shared generation, public-only pipeline |
 | [015](./ADR-015-cloud-portability-ports-and-adapters.md) | Cloud portability via ports & adapters; provider by config (amends 001, 004) |
 | [016](./ADR-016-design-tokens-and-status-colors.md) | Design tokens & colorblind-safe status colors (design) |
-| [017](./ADR-017-product-name.md) | Product name: Freshet (provisional, design) |
+| [017](./ADR-017-product-name.md) | Product name: Verameter (provisional, design) |
