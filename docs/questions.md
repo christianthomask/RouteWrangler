@@ -14,10 +14,11 @@ Format: `[status] question — context / who owns it`.
       scale-to-zero availability + resume latency in our region, and Cognito
       free-tier MAU against live pricing. Target idle ≈ $5–15/mo; **flag to CTK
       if reality disagrees before creating paid resources.** — *owner: CTK*
-- [ ] **Final product name + mark.** Repo/codebase currently uses
-      "RouteWrangler" (working). Confirm the name and mark coming out of the
-      Design Sprint 0 so branding is locked before the prod demo. — *owner:
-      Design → CTK*
+- [x] **Product name chosen: Freshet** (ADR-017, provisional). Repo/package ids
+      stay `routewrangler`. **Before public launch:** (a) trademark clearance in
+      software classes vs *Freshet Systems* (water-storage hardware, different
+      class); (b) secure `freshet.com` (parked/for-sale) or a committed alternate
+      TLD. — *owner: CTK*
 - [ ] **AWS region.** Runbook assumes `us-west-2` (Central Coast proximity).
       Confirm region for both dev and prod (affects Aurora scale-to-zero
       availability). — *owner: CTK*
