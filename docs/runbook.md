@@ -8,12 +8,23 @@ and documented step by step.
 
 ## Portability map (ADR-015)
 
-| Concern | Neutral core | AWS target | Azure target | Local |
-| --- | --- | --- | --- | --- |
-| API | container | App Runner | Container Apps | `pnpm dev` |
-| DB | Postgres (`DATABASE_URL`) | Aurora Serverless v2 | Azure DB for PostgreSQL | docker Postgres |
-| Storage | `StoragePort` | S3 | Azure Blob | MinIO (S3-compatible) |
-| Auth | OIDC `TokenVerifier` | Cognito | Entra External ID | dev-auth shim |
+| Concern | Neutral core | AWS | Azure | Cloudflare | Local |
+| --- | --- | --- | --- | --- | --- |
+| API | container | App Runner | Container Apps | Containers¹ (or Fly/Render) | `pnpm dev` |
+| DB | Postgres (`DATABASE_URL`) | Aurora Serverless v2 | Azure DB for PostgreSQL | Neon + Hyperdrive² | docker Postgres |
+| Storage | `StoragePort` | S3 | Azure Blob | **R2 (existing S3 adapter)** | MinIO (S3-compatible) |
+| Auth | OIDC `TokenVerifier` | Cognito | Entra External ID | 3rd-party OIDC IdP³ | dev-auth shim |
+| Web | Next.js | Vercel | Static Web Apps | Workers (OpenNext) | `next dev` |
+
+¹ Cloudflare Containers is Workers-Paid-gated and beta-flavored (scale-to-zero,
+ephemeral disk, no native autoscaling); for guaranteed always-on, host the API on
+Fly/Render and use Cloudflare for edge/storage. ² Cloudflare has **no managed
+Postgres** — bring Neon/Supabase, optionally fronted by Hyperdrive. ³ Cloudflare
+has **no CIAM**; Cloudflare Access is zero-trust SSO, not app-user auth — use a
+third-party OIDC IdP (Clerk/Auth0/WorkOS) via the generic OIDC adapter.
+
+**R2 is the standout fit:** our existing S3 adapter talks to R2 with only an
+endpoint + access-key change (zero code), and R2 has no egress fees.
 
 ---
 

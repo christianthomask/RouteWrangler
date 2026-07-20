@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { PRODUCT_NAME, PRODUCT_DESCRIPTOR } from '@/design/brand';
 
 export const metadata: Metadata = {
-  title: 'RouteWrangler',
-  description: 'Source-agnostic Meter Data Management for contract water-meter reading.',
+  title: PRODUCT_NAME,
+  description: PRODUCT_DESCRIPTOR,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

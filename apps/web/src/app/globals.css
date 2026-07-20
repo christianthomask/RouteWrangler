@@ -1,21 +1,10 @@
+@import '../design/tokens.css';
+
 /*
- * Placeholder design tokens. The Design workstream (DESIGN_BRIEF, Sprint 0)
- * owns the real palette, type scale, and component inventory; these exist only
- * so the skeleton renders coherently until the token contract lands.
+ * Base styles + the primitive component classes that back the component
+ * inventory (docs/design/component-inventory.md). Everything references design
+ * tokens — no raw hex here.
  */
-:root {
-  --rw-bg: #0f1720;
-  --rw-surface: #16212e;
-  --rw-surface-2: #1e2c3c;
-  --rw-border: #2b3d52;
-  --rw-text: #e8eef5;
-  --rw-text-muted: #9fb0c3;
-  --rw-accent: #2f9e8f;
-  --rw-accent-strong: #24bfa8;
-  --rw-danger: #e05b5b;
-  --rw-radius: 10px;
-  --rw-font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-}
 
 * {
   box-sizing: border-box;
@@ -28,65 +17,188 @@ body {
   background: var(--rw-bg);
   color: var(--rw-text);
   font-family: var(--rw-font);
+  font-size: var(--rw-text-base);
+  line-height: var(--rw-leading-normal);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 a {
-  color: var(--rw-accent-strong);
+  color: var(--rw-link);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
 }
 
+:focus-visible {
+  outline: 2px solid var(--rw-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--rw-radius-sm);
+}
+
+/* ── surfaces ─────────────────────────────────────────────────────────── */
 .rw-card {
   background: var(--rw-surface);
   border: 1px solid var(--rw-border);
-  border-radius: var(--rw-radius);
-  padding: 1.5rem;
+  border-radius: var(--rw-radius-md);
+  padding: var(--rw-space-6);
+  box-shadow: var(--rw-shadow-1);
+}
+
+/* ── forms ────────────────────────────────────────────────────────────── */
+.rw-label {
+  display: block;
+  font-size: var(--rw-text-sm);
+  font-weight: var(--rw-weight-medium);
+  color: var(--rw-text-secondary);
+  margin-bottom: var(--rw-space-2);
 }
 
 .rw-input {
   width: 100%;
   padding: 0.6rem 0.75rem;
-  background: var(--rw-surface-2);
-  border: 1px solid var(--rw-border);
-  border-radius: 8px;
+  background: var(--rw-surface);
+  border: 1px solid var(--rw-border-strong);
+  border-radius: var(--rw-radius);
   color: var(--rw-text);
-  font-size: 0.95rem;
+  font-size: var(--rw-text-md);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.rw-input::placeholder {
+  color: var(--rw-text-muted);
+}
+.rw-input:focus {
+  outline: none;
+  border-color: var(--rw-brand);
+  box-shadow: 0 0 0 3px var(--rw-focus-ring);
 }
 
+/* ── buttons ──────────────────────────────────────────────────────────── */
 .rw-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--rw-space-2);
   width: 100%;
   padding: 0.65rem 1rem;
-  background: var(--rw-accent);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.95rem;
-  font-weight: 600;
+  background: var(--rw-brand);
+  color: var(--rw-brand-contrast);
+  border: 1px solid transparent;
+  border-radius: var(--rw-radius);
+  font-size: var(--rw-text-md);
+  font-weight: var(--rw-weight-semibold);
   cursor: pointer;
+  transition: background 0.12s ease;
 }
-
 .rw-button:hover {
-  background: var(--rw-accent-strong);
+  background: var(--rw-brand-strong);
 }
-
 .rw-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-
-.rw-label {
-  display: block;
-  font-size: 0.8rem;
-  color: var(--rw-text-muted);
-  margin-bottom: 0.35rem;
+.rw-button--ghost {
+  width: auto;
+  background: transparent;
+  color: var(--rw-text-secondary);
+  border-color: var(--rw-border-strong);
+  font-weight: var(--rw-weight-medium);
+  padding: 0.4rem 0.75rem;
+  font-size: var(--rw-text-sm);
+}
+.rw-button--ghost:hover {
+  background: var(--rw-surface-2);
 }
 
+/* ── badges & chips ───────────────────────────────────────────────────── */
 .rw-badge {
-  display: inline-block;
-  padding: 0.15rem 0.6rem;
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rw-space-1);
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--rw-radius-pill);
   background: var(--rw-surface-2);
   border: 1px solid var(--rw-border);
-  font-size: 0.75rem;
+  color: var(--rw-text-secondary);
+  font-size: var(--rw-text-xs);
+  font-weight: var(--rw-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/*
+ * Severity chip — color + icon + text; never color alone (ADR-016). The dot is
+ * a redundant channel for quick scanning; the word carries the meaning.
+ */
+.rw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.12rem 0.55rem;
+  border-radius: var(--rw-radius-pill);
+  font-size: var(--rw-text-xs);
+  font-weight: var(--rw-weight-semibold);
+  border: 1px solid transparent;
+}
+.rw-chip::before {
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.rw-chip--low {
+  color: var(--rw-sev-low);
+  background: var(--rw-sev-low-bg);
+}
+.rw-chip--medium {
+  color: var(--rw-sev-medium);
+  background: var(--rw-sev-medium-bg);
+}
+.rw-chip--high {
+  color: var(--rw-sev-high);
+  background: var(--rw-sev-high-bg);
+}
+.rw-chip--critical {
+  color: var(--rw-sev-critical);
+  background: var(--rw-sev-critical-bg);
+}
+
+/* ── sync-state pill (field offline) ──────────────────────────────────── */
+.rw-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--rw-text-xs);
+  font-weight: var(--rw-weight-medium);
+  color: var(--rw-text-secondary);
+}
+.rw-sync::before {
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex: none;
+}
+.rw-sync--pending::before {
+  background: var(--rw-sync-pending);
+}
+.rw-sync--syncing::before {
+  background: var(--rw-sync-syncing);
+}
+.rw-sync--synced::before {
+  background: var(--rw-sync-synced);
+}
+.rw-sync--failed::before {
+  background: var(--rw-sync-failed);
+}
+
+/* ── misc ─────────────────────────────────────────────────────────────── */
+.rw-muted {
+  color: var(--rw-text-muted);
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
 }

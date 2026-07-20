@@ -1,0 +1,197 @@
+/*
+ * RouteWrangler — design tokens (the importable contract; DESIGN_BRIEF §3).
+ * Semantic roles only: components reference roles, never raw hex, so light/dark
+ * and future re-theming change in one place. Severity + sync colors are drawn
+ * from a CVD-validated status palette and are ALWAYS paired with an icon + text
+ * label (never color alone) — see docs/decisions/ADR-016.
+ *
+ * North star: calm, dense, trustworthy utility software. Light-first (reads as
+ * enterprise software a city trusts with billing data), full dark support.
+ */
+
+:root {
+  /* ── brand (water-teal identity; used for mark, primary actions, focus) ── */
+  --rw-brand: #0e7490;
+  --rw-brand-strong: #0c617a;
+  --rw-brand-soft: #e2f2f6;
+  --rw-brand-contrast: #ffffff;
+
+  /* ── surfaces & ink ──────────────────────────────────────────────────── */
+  --rw-bg: #f7f7f5; /* page plane */
+  --rw-surface: #ffffff; /* cards, panels */
+  --rw-surface-2: #f2f2ef; /* subtle fills, hover rows */
+  --rw-surface-3: #eae9e4; /* pressed / selected wash */
+  --rw-border: #e2e1db; /* hairline dividers */
+  --rw-border-strong: #cfcec7;
+  --rw-text: #14140f; /* primary ink */
+  --rw-text-secondary: #52514e;
+  --rw-text-muted: #8a8983; /* axis, meta, placeholder */
+  --rw-text-inverse: #ffffff;
+
+  /* legacy aliases (kept so existing components keep working) */
+  --rw-accent: var(--rw-brand);
+  --rw-accent-strong: var(--rw-brand-strong);
+
+  /* ── interactive ─────────────────────────────────────────────────────── */
+  --rw-link: #0e7490;
+  --rw-focus-ring: rgba(14, 116, 144, 0.4);
+
+  /* ── severity (exception triage) — status palette, always with label ──── */
+  --rw-sev-low: #64748b; /* slate — informational, low urgency */
+  --rw-sev-medium: #b8790a; /* amber (text-safe step of warning) */
+  --rw-sev-medium-bg: #fdf1d6;
+  --rw-sev-high: #c2542b; /* orange (serious) */
+  --rw-sev-high-bg: #fbe6dc;
+  --rw-sev-critical: #c0392b; /* red (critical) */
+  --rw-sev-critical-bg: #fbe1de;
+  --rw-sev-low-bg: #eceef1;
+
+  /* ── state / status ──────────────────────────────────────────────────── */
+  --rw-success: #0f8a2e; /* resolved / billable / OK */
+  --rw-success-bg: #e2f3e6;
+  --rw-warning: #b8790a;
+  --rw-danger: #c0392b;
+  --rw-danger-bg: #fbe1de;
+
+  /* ── sync state (field offline) — always icon + label ────────────────── */
+  --rw-sync-pending: #b8790a; /* queued, not yet sent */
+  --rw-sync-syncing: #0e7490; /* in flight */
+  --rw-sync-synced: #0f8a2e; /* accepted exactly once */
+  --rw-sync-failed: #c0392b; /* needs retry */
+
+  /* ── typography ──────────────────────────────────────────────────────── */
+  --rw-font: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --rw-font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  --rw-text-xs: 0.75rem; /* 12 */
+  --rw-text-sm: 0.8125rem; /* 13 */
+  --rw-text-base: 0.875rem; /* 14 — dense enterprise base */
+  --rw-text-md: 1rem; /* 16 */
+  --rw-text-lg: 1.125rem; /* 18 */
+  --rw-text-xl: 1.25rem; /* 20 */
+  --rw-text-2xl: 1.5rem; /* 24 */
+  --rw-text-3xl: 1.875rem; /* 30 */
+  --rw-text-4xl: 2.25rem; /* 36 */
+  --rw-leading-tight: 1.25;
+  --rw-leading-normal: 1.5;
+  --rw-weight-normal: 400;
+  --rw-weight-medium: 500;
+  --rw-weight-semibold: 600;
+  --rw-weight-bold: 700;
+
+  /* ── spacing (4px grid) ──────────────────────────────────────────────── */
+  --rw-space-1: 0.25rem;
+  --rw-space-2: 0.5rem;
+  --rw-space-3: 0.75rem;
+  --rw-space-4: 1rem;
+  --rw-space-5: 1.25rem;
+  --rw-space-6: 1.5rem;
+  --rw-space-8: 2rem;
+  --rw-space-10: 2.5rem;
+  --rw-space-12: 3rem;
+  --rw-space-16: 4rem;
+
+  /* ── radius ──────────────────────────────────────────────────────────── */
+  --rw-radius-sm: 6px;
+  --rw-radius: 8px;
+  --rw-radius-md: 10px;
+  --rw-radius-lg: 14px;
+  --rw-radius-pill: 999px;
+
+  /* ── elevation ───────────────────────────────────────────────────────── */
+  --rw-shadow-1: 0 1px 2px rgba(20, 20, 15, 0.06), 0 1px 1px rgba(20, 20, 15, 0.04);
+  --rw-shadow-2: 0 2px 8px rgba(20, 20, 15, 0.08);
+  --rw-shadow-3: 0 10px 28px rgba(20, 20, 15, 0.14);
+
+  color-scheme: light;
+}
+
+/* ── dark mode: OS setting, unless a light toggle wins ───────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --rw-brand: #22b8cf;
+    --rw-brand-strong: #3ac6db;
+    --rw-brand-soft: #0f2f38;
+    --rw-brand-contrast: #06232b;
+
+    --rw-bg: #0d0f10;
+    --rw-surface: #16191b;
+    --rw-surface-2: #1e2225;
+    --rw-surface-3: #262b2f;
+    --rw-border: #2c3236;
+    --rw-border-strong: #3a4145;
+    --rw-text: #f2f3f2;
+    --rw-text-secondary: #c3c2b7;
+    --rw-text-muted: #8f938f;
+    --rw-text-inverse: #0d0f10;
+
+    --rw-link: #22b8cf;
+    --rw-focus-ring: rgba(34, 184, 207, 0.45);
+
+    --rw-sev-low: #94a3b8;
+    --rw-sev-low-bg: #20262c;
+    --rw-sev-medium: #fab219;
+    --rw-sev-medium-bg: #2e2410;
+    --rw-sev-high: #ec835a;
+    --rw-sev-high-bg: #2e1d14;
+    --rw-sev-critical: #ef5350;
+    --rw-sev-critical-bg: #2e1513;
+
+    --rw-success: #22c35a;
+    --rw-success-bg: #122a18;
+    --rw-warning: #fab219;
+    --rw-danger: #ef5350;
+    --rw-danger-bg: #2e1513;
+
+    --rw-sync-pending: #fab219;
+    --rw-sync-syncing: #22b8cf;
+    --rw-sync-synced: #22c35a;
+    --rw-sync-failed: #ef5350;
+
+    --rw-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --rw-shadow-2: 0 2px 10px rgba(0, 0, 0, 0.5);
+    --rw-shadow-3: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+    color-scheme: dark;
+  }
+}
+
+/* explicit dark toggle wins in both directions */
+:root[data-theme='dark'] {
+  --rw-brand: #22b8cf;
+  --rw-brand-strong: #3ac6db;
+  --rw-brand-soft: #0f2f38;
+  --rw-brand-contrast: #06232b;
+  --rw-bg: #0d0f10;
+  --rw-surface: #16191b;
+  --rw-surface-2: #1e2225;
+  --rw-surface-3: #262b2f;
+  --rw-border: #2c3236;
+  --rw-border-strong: #3a4145;
+  --rw-text: #f2f3f2;
+  --rw-text-secondary: #c3c2b7;
+  --rw-text-muted: #8f938f;
+  --rw-text-inverse: #0d0f10;
+  --rw-link: #22b8cf;
+  --rw-focus-ring: rgba(34, 184, 207, 0.45);
+  --rw-sev-low: #94a3b8;
+  --rw-sev-low-bg: #20262c;
+  --rw-sev-medium: #fab219;
+  --rw-sev-medium-bg: #2e2410;
+  --rw-sev-high: #ec835a;
+  --rw-sev-high-bg: #2e1d14;
+  --rw-sev-critical: #ef5350;
+  --rw-sev-critical-bg: #2e1513;
+  --rw-success: #22c35a;
+  --rw-success-bg: #122a18;
+  --rw-warning: #fab219;
+  --rw-danger: #ef5350;
+  --rw-danger-bg: #2e1513;
+  --rw-sync-pending: #fab219;
+  --rw-sync-syncing: #22b8cf;
+  --rw-sync-synced: #22c35a;
+  --rw-sync-failed: #ef5350;
+  --rw-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --rw-shadow-2: 0 2px 10px rgba(0, 0, 0, 0.5);
+  --rw-shadow-3: 0 12px 32px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}

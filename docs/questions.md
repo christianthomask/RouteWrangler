@@ -41,9 +41,18 @@ Format: `[status] question — context / who owns it`.
 
 - [ ] **Production cloud target undecided.** AWS card verification was blocked;
       the app is now provider-agnostic (ports & adapters) and runs fully local.
-      Decide the prod target (AWS / Azure / other) when a payment method
-      verifies. **Note:** Azure sign-up also requires a verifiable card — confirm
-      before committing to Azure. — *owner: CTK*
+      Candidates: AWS, Azure, **Cloudflare** (user preference). Decide when a
+      payment method verifies. **Card notes:** Azure sign-up needs a verifiable
+      card; on Cloudflare, Pages/Workers-Free/Hyperdrive-Free need **no** card,
+      but **R2 and Containers/Workers-Paid require a card** (Cloudflare accepts
+      **PayPal**, which may sidestep the AWS issue). — *owner: CTK*
+- [ ] **Cloudflare specifics to confirm before committing** (from infra research):
+      (a) Cloudflare Containers GA status + cold-start/idle behavior vs our SLAs —
+      it's beta-flavored and Workers-Paid-gated; the fallback is hosting the API
+      on Fly/Render and using Cloudflare for edge/R2 only. (b) Next.js via
+      **OpenNext on Workers** (the older next-on-pages is deprecated). (c) Pick the
+      OIDC IdP (Clerk/Auth0/WorkOS) since Cloudflare has no CIAM. R2 needs no code
+      change (existing S3 adapter). — *owner: Dev → CTK*
 - [ ] **Azure Blob adapter unverified.** Implemented to the SAS contract but not
       yet run against a live Azure account. Verify (or delete) once an Azure
       account exists. The S3/MinIO path is verified end to end. — *owner: Dev*
