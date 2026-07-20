@@ -11,3 +11,6 @@ export * from './ingestion';
 export * from './taxonomy';
 export * from './photos';
 export * from './runs';
+export * from './exceptions';
+export * from './dashboard';
+export * from './meter-history';

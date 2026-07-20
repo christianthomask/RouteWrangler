@@ -136,6 +136,15 @@ export class IngestionService {
         .where(and(eq(runStops.id, ev.runStopId), eq(runStops.status, 'pending')));
     }
 
+    // A reread answering an exception advances it to reread_received (W4). The
+    // supervisor then compares side-by-side and resolves.
+    if (ev.exceptionId) {
+      await this.db
+        .update(exceptions)
+        .set({ status: 'reread_received', updatedAt: new Date() })
+        .where(eq(exceptions.id, ev.exceptionId));
+    }
+
     if (result.exceptions.length > 0) {
       this.logger.log(
         `read ${ev.id} on meter ${meter.serial}: ${result.exceptions.join(', ')} (billable=${result.billable})`,

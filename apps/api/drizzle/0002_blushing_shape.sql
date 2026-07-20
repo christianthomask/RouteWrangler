@@ -1,0 +1,1 @@
+ALTER TABLE "exceptions" ADD COLUMN "certified_read_event_id" uuid;

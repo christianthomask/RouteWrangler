@@ -208,6 +208,10 @@ export const exceptions = pgTable('exceptions', {
   rereadCount: integer('reread_count').notNull().default(0),
   actionedBy: uuid('actioned_by').references(() => users.id),
   resolutionNote: text('resolution_note'),
+  // The read the supervisor certified as billable at resolution. Recorded here
+  // (not by mutating the immutable read — ADR-002) so export can compute final
+  // billability from the certification decision (W4).
+  certifiedReadEventId: uuid('certified_read_event_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
