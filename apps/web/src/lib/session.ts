@@ -1,0 +1,42 @@
+'use client';
+
+import { authDevBypass } from './config';
+
+/**
+ * Client session. Two modes: `dev` stores a seeded user's sub and sends it as
+ * `x-dev-user-sub` (local, ADR-012); `token` stores a real IdP JWT (Clerk, when
+ * wired). One accessor — `authHeaders()` — so callers never branch on mode.
+ */
+const DEV_SUB_KEY = 'rw.devSub';
+const TOKEN_KEY = 'rw.idToken';
+
+export function signInDev(sub: string): void {
+  window.localStorage.setItem(DEV_SUB_KEY, sub);
+}
+
+export function setToken(token: string): void {
+  window.localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function signOut(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(DEV_SUB_KEY);
+  window.localStorage.removeItem(TOKEN_KEY);
+}
+
+export function isSignedIn(): boolean {
+  if (typeof window === 'undefined') return false;
+  return Boolean(window.localStorage.getItem(DEV_SUB_KEY) || window.localStorage.getItem(TOKEN_KEY));
+}
+
+/** Auth headers for an API request, or null when not signed in. */
+export function authHeaders(): Record<string, string> | null {
+  if (typeof window === 'undefined') return null;
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  if (token) return { authorization: `Bearer ${token}` };
+  if (authDevBypass) {
+    const sub = window.localStorage.getItem(DEV_SUB_KEY);
+    if (sub) return { 'x-dev-user-sub': sub };
+  }
+  return null;
+}

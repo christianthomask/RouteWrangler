@@ -3,31 +3,27 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Brand } from '@/components/Brand';
-import { authConfigured } from '@/lib/config';
-import { signIn } from '@/lib/cognito';
+import { authDevBypass, clerkConfigured, DEV_USERS, type DevUser } from '@/lib/config';
+import { signInDev } from '@/lib/session';
 import { fetchMe } from '@/lib/api';
 import { HOME_BY_ROLE } from '@/design/tokens';
 import { PRODUCT_DESCRIPTOR } from '@/design/brand';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function continueAs(user: DevUser) {
     setError(null);
-    setBusy(true);
+    setBusy(user.sub);
     try {
-      await signIn(username, password);
+      signInDev(user.sub);
       const me = await fetchMe();
       router.push(HOME_BY_ROLE[me.role]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign-in failed');
-    } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -42,7 +38,7 @@ export default function LoginPage() {
           'radial-gradient(1200px 500px at 50% -10%, var(--rw-brand-soft), transparent 60%), var(--rw-bg)',
       }}
     >
-      <div style={{ width: '100%', maxWidth: 380 }}>
+      <div style={{ width: '100%', maxWidth: 400 }}>
         <div
           style={{
             display: 'flex',
@@ -54,30 +50,52 @@ export default function LoginPage() {
           }}
         >
           <Brand size={36} />
-          <p
-            style={{
-              margin: 0,
-              fontSize: 'var(--rw-text-sm)',
-              color: 'var(--rw-text-muted)',
-              maxWidth: 300,
-            }}
-          >
+          <p style={{ margin: 0, fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)', maxWidth: 300 }}>
             {PRODUCT_DESCRIPTOR}
           </p>
         </div>
 
-        <form className="rw-card" onSubmit={onSubmit} style={{ boxShadow: 'var(--rw-shadow-2)' }}>
+        <div className="rw-card" style={{ boxShadow: 'var(--rw-shadow-2)' }}>
           <h1
             style={{
               fontSize: 'var(--rw-text-lg)',
               fontWeight: 'var(--rw-weight-semibold)',
-              margin: '0 0 var(--rw-space-5)',
+              margin: '0 0 var(--rw-space-2)',
             }}
           >
             Sign in
           </h1>
 
-          {!authConfigured && (
+          {authDevBypass ? (
+            <>
+              <p
+                style={{
+                  fontSize: 'var(--rw-text-sm)',
+                  color: 'var(--rw-text-muted)',
+                  margin: '0 0 var(--rw-space-4)',
+                }}
+              >
+                Local development — continue as a seeded user. (Clerk sign-in
+                replaces this in deployed environments.)
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-2)' }}>
+                {DEV_USERS.map((u) => (
+                  <button
+                    key={u.sub}
+                    className="rw-button rw-button--ghost"
+                    style={{ width: '100%', justifyContent: 'space-between', padding: '0.7rem 0.9rem' }}
+                    disabled={busy !== null}
+                    onClick={() => continueAs(u)}
+                  >
+                    <span style={{ fontWeight: 'var(--rw-weight-semibold)', color: 'var(--rw-text)' }}>
+                      {busy === u.sub ? 'Signing in…' : u.displayName}
+                    </span>
+                    <span className="rw-badge">{u.role}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
             <p
               style={{
                 fontSize: 'var(--rw-text-sm)',
@@ -86,58 +104,21 @@ export default function LoginPage() {
                 border: '1px solid var(--rw-border)',
                 borderRadius: 'var(--rw-radius)',
                 padding: '0.6rem 0.75rem',
-                margin: '0 0 var(--rw-space-4)',
+                margin: 'var(--rw-space-2) 0 0',
               }}
             >
-              Identity provider pending setup — sign-in activates once it is
-              configured (see docs/runbook.md).
+              {clerkConfigured
+                ? 'Redirecting to sign-in…'
+                : 'Identity provider pending setup (see docs/runbook.md).'}
             </p>
           )}
 
-          <div style={{ marginBottom: 'var(--rw-space-4)' }}>
-            <label className="rw-label" htmlFor="username">
-              Username
-            </label>
-            <input
-              id="username"
-              className="rw-input"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              placeholder="you@city.gov"
-            />
-          </div>
-
-          <div style={{ marginBottom: 'var(--rw-space-5)' }}>
-            <label className="rw-label" htmlFor="password">
-              Password
-            </label>
-            <input
-              id="password"
-              className="rw-input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-            />
-          </div>
-
           {error && (
-            <p
-              style={{
-                color: 'var(--rw-danger)',
-                fontSize: 'var(--rw-text-sm)',
-                margin: '0 0 var(--rw-space-4)',
-              }}
-            >
+            <p style={{ color: 'var(--rw-danger)', fontSize: 'var(--rw-text-sm)', marginTop: 'var(--rw-space-4)' }}>
               {error}
             </p>
           )}
-
-          <button className="rw-button" type="submit" disabled={busy || !authConfigured}>
-            {busy ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
+        </div>
 
         <p
           style={{

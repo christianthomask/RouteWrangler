@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { MeResponse, Role } from '@routewrangler/contracts';
 import { Brand } from './Brand';
 import { fetchMe } from '@/lib/api';
-import { signOut } from '@/lib/cognito';
+import { signOut } from '@/lib/session';
 
 /**
  * Authenticated shell for a role-gated route group. Fetches the /me hello and
