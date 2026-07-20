@@ -48,7 +48,7 @@ export default function ExceptionDetailPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(280px,1fr)', gap: 'var(--rw-space-5)', alignItems: 'start' }}>
+      <div className="rw-split">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-5)' }}>
           <section className="rw-card">
             <h2 style={cardTitle}>Consumption — last 12 months</h2>

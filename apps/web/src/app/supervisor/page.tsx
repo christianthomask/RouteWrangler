@@ -58,66 +58,50 @@ export default function DashboardPage() {
         {runsToday === 0 ? (
           <EmptyState title="No runs scheduled today" hint="Assign a route to a reader to start a run." />
         ) : (
-          <div className="rw-card" style={{ padding: 0, overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--rw-text-sm)' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', color: 'var(--rw-text-muted)' }}>
-                  <th style={th}>Route</th>
-                  <th style={th}>Client</th>
-                  <th style={th}>Reader</th>
-                  <th style={th}>Progress</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Stops</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.runs.map((r) => (
-                  <tr key={r.runId} style={{ borderTop: '1px solid var(--rw-border)' }}>
-                    <td style={td}>{r.routeName}</td>
-                    <td style={td}>{r.clientName}</td>
-                    <td style={td}>{r.readerName ?? '—'}</td>
-                    <td style={td}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ flex: 1, maxWidth: 140, height: 6, background: 'var(--rw-surface-3)', borderRadius: 999 }}>
-                          <div style={{ width: `${r.completionPct}%`, height: '100%', background: 'var(--rw-brand)', borderRadius: 999 }} />
-                        </div>
-                        <span className="tabular" style={{ color: 'var(--rw-text-muted)' }}>{r.completionPct}%</span>
-                      </div>
-                    </td>
-                    <td style={{ ...td, textAlign: 'right' }} className="tabular">
-                      {r.readStops}/{r.totalStops}
-                      {r.pendingStops ? <span style={{ color: 'var(--rw-text-muted)' }}> · {r.pendingStops} pending</span> : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="rw-card" style={{ padding: 0 }}>
+            <div className="rw-rows">
+              {data.runs.map((r) => (
+                <div key={r.runId} className="rw-row" style={{ cursor: 'default' }}>
+                  <div className="rw-row__top">
+                    <strong>{r.routeName}</strong>
+                    <span className="tabular" style={{ color: 'var(--rw-text-muted)' }}>{r.completionPct}%</span>
+                  </div>
+                  <div className="rw-row__meta">
+                    <span>{r.clientName}</span>
+                    <span>{r.readerName ?? 'Unassigned'}</span>
+                    <span style={{ marginLeft: 'auto' }} className="tabular">
+                      {r.readStops}/{r.totalStops} read{r.pendingStops ? ` · ${r.pendingStops} pending` : ''}
+                    </span>
+                  </div>
+                  <div style={{ height: 6, background: 'var(--rw-surface-3)', borderRadius: 999, marginTop: 2 }}>
+                    <div style={{ width: `${r.completionPct}%`, height: '100%', background: 'var(--rw-brand)', borderRadius: 999 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>
 
       <section>
         <h2 style={{ fontSize: 'var(--rw-text-lg)', margin: '0 0 var(--rw-space-3)' }}>Readers</h2>
-        <div className="rw-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--rw-text-sm)' }}>
-            <thead>
-              <tr style={{ textAlign: 'left', color: 'var(--rw-text-muted)' }}>
-                <th style={th}>Reader</th>
-                <th style={{ ...th, textAlign: 'right' }}>Reads</th>
-                <th style={{ ...th, textAlign: 'right' }}>Exceptions</th>
-                <th style={{ ...th, textAlign: 'right' }}>Exception rate</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.readers.map((r) => (
-                <tr key={r.readerId} style={{ borderTop: '1px solid var(--rw-border)' }}>
-                  <td style={td}>{r.readerName}</td>
-                  <td style={{ ...td, textAlign: 'right' }} className="tabular">{num(r.reads)}</td>
-                  <td style={{ ...td, textAlign: 'right' }} className="tabular">{num(r.exceptions)}</td>
-                  <td style={{ ...td, textAlign: 'right' }} className="tabular">{Math.round(r.exceptionRate * 100)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="rw-card" style={{ padding: 0 }}>
+          <div className="rw-rows">
+            {data.readers.map((r) => (
+              <div key={r.readerId} className="rw-row" style={{ cursor: 'default' }}>
+                <div className="rw-row__top">
+                  <strong>{r.readerName}</strong>
+                  <span className="tabular" style={{ color: 'var(--rw-text-muted)' }}>
+                    {Math.round(r.exceptionRate * 100)}% exc. rate
+                  </span>
+                </div>
+                <div className="rw-row__meta tabular">
+                  <span>{num(r.reads)} reads</span>
+                  <span>{num(r.exceptions)} exceptions</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -127,6 +111,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-const th: React.CSSProperties = { padding: '0.6rem 0.9rem', fontWeight: 600, fontSize: 'var(--rw-text-xs)', textTransform: 'uppercase', letterSpacing: '0.03em' };
-const td: React.CSSProperties = { padding: '0.6rem 0.9rem' };

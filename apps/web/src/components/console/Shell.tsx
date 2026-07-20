@@ -14,9 +14,14 @@ const NAV = [
   { href: '/supervisor/exceptions', label: 'Exceptions' },
 ];
 
+function isActive(pathname: string, href: string): boolean {
+  return href === '/supervisor' ? pathname === '/supervisor' : pathname.startsWith(href);
+}
+
 /**
- * Supervisor console shell (DESIGN_BRIEF §4) — left rail + top bar. Role-guarded
- * (convenience; the API enforces roles server-side — BUILD_SPEC §6).
+ * Supervisor console shell (ADR-018 — mobile-first). Desktop gets a left rail;
+ * on phones the nav becomes a fixed bottom tab bar (supervisors work from the
+ * field). Role-guarded (the API enforces roles server-side — BUILD_SPEC §6).
  */
 export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -52,30 +57,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', minHeight: '100vh' }}>
-      <aside
-        style={{
-          borderRight: '1px solid var(--rw-border)',
-          background: 'var(--rw-surface)',
-          padding: 'var(--rw-space-4)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--rw-space-4)',
-        }}
-      >
+    <div className="rw-shell">
+      <aside className="rw-rail">
         <Link href="/supervisor" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
           <BrandMark size={22} />
-          <span style={{ fontWeight: 700, color: 'var(--rw-text)', letterSpacing: '-0.01em' }}>
-            {PRODUCT_NAME}
-          </span>
+          <span style={{ fontWeight: 700, color: 'var(--rw-text)', letterSpacing: '-0.01em' }}>{PRODUCT_NAME}</span>
         </Link>
-
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {NAV.map((item) => {
-            const active =
-              item.href === '/supervisor'
-                ? pathname === '/supervisor'
-                : pathname.startsWith(item.href);
+            const active = isActive(pathname, item.href);
             return (
               <Link
                 key={item.href}
@@ -105,22 +95,33 @@ export function Shell({ children }: { children: React.ReactNode }) {
             background: 'var(--rw-surface)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'flex-end',
+            justifyContent: 'space-between',
             gap: 'var(--rw-space-3)',
-            padding: '0 var(--rw-space-6)',
+            padding: '0 var(--rw-space-4)',
+            position: 'sticky',
+            top: 0,
+            zIndex: 20,
           }}
         >
-          {me && (
-            <span style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-secondary)' }}>
-              {me.displayName} <span className="rw-badge">{me.role}</span>
-            </span>
-          )}
-          <button className="rw-button rw-button--ghost" onClick={onSignOut}>
-            Sign out
-          </button>
+          {/* brand shows in the header on mobile (rail is hidden) */}
+          <Link href="/supervisor" className="rw-brand-mobile" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
+            <BrandMark size={20} />
+            <span style={{ fontWeight: 700, color: 'var(--rw-text)' }}>{PRODUCT_NAME}</span>
+          </Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--rw-space-3)', marginLeft: 'auto' }}>
+            {me && (
+              <span style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-secondary)' }}>
+                <span className="rw-hide-sm">{me.displayName} </span>
+                <span className="rw-badge">{me.role}</span>
+              </span>
+            )}
+            <button className="rw-button rw-button--ghost" onClick={onSignOut}>
+              Sign out
+            </button>
+          </div>
         </header>
 
-        <main style={{ padding: 'var(--rw-space-6)', maxWidth: 1200, width: '100%', margin: '0 auto' }}>
+        <main className="rw-main">
           {denied ? (
             <div className="rw-card">
               <p style={{ color: 'var(--rw-danger)', margin: 0 }}>Could not reach the API.</p>
@@ -135,6 +136,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
           )}
         </main>
       </div>
+
+      <nav className="rw-bottomnav">
+        {NAV.map((item) => (
+          <Link key={item.href} href={item.href} data-active={isActive(pathname, item.href)}>
+            {item.label}
+          </Link>
+        ))}
+      </nav>
     </div>
   );
 }
