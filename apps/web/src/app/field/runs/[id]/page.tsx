@@ -8,7 +8,9 @@ import { useRouter } from 'next/navigation';
 import { fetchRun } from '@/lib/api';
 import { useFieldQueue } from '@/lib/field/useFieldQueue';
 import type { QueuedAction } from '@/lib/field/types';
-import { RouteMap, type MapStop } from '@/components/field/RouteMap';
+import { RouteMapView } from '@/components/field/RouteMapView';
+import type { MapStop } from '@/components/field/RouteMap';
+import { warmRouteTiles } from '@/lib/field/mapCache';
 import { EmptyState, Loading } from '@/components/ui';
 
 /** Per-stop display state, merging server truth with the local queue. */
@@ -42,7 +44,12 @@ export default function FieldRunPage() {
 
   useEffect(() => {
     fetchRun(id)
-      .then(setRun)
+      .then((r) => {
+        setRun(r);
+        // Warm this route's basemap tiles for offline use while we still have
+        // signal (no-op until tiles are configured; best-effort otherwise).
+        void warmRouteTiles(r.stops);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'failed'));
   }, [id]);
 
@@ -80,7 +87,7 @@ export default function FieldRunPage() {
       </div>
 
       <div className="rw-card">
-        <RouteMap
+        <RouteMapView
           stops={mapStops}
           currentId={currentStop?.id}
           focus="route"

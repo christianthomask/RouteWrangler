@@ -9,9 +9,18 @@ import type { Role } from '@routewrangler/contracts';
 export const config = {
   apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001',
   clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '',
+  /**
+   * MapLibre style JSON for the field basemap (ADR-022). Self-hosted: the style
+   * points at our PMTiles vector source on R2. Empty until the tile packs are
+   * provisioned — the map degrades to the dependency-free SVG plot until then.
+   */
+  mapStyleUrl: process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? '',
 };
 
 export const clerkConfigured = Boolean(config.clerkPublishableKey);
+
+/** Real basemap is available only once a style URL is configured (else SVG fallback). */
+export const basemapConfigured = Boolean(config.mapStyleUrl);
 
 /** Dev-bypass active only when no real IdP is configured and not explicitly off. */
 export const authDevBypass =

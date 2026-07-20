@@ -11,7 +11,8 @@ import type {
 } from '@routewrangler/contracts';
 import { fetchFieldMeterReads, fetchMe, fetchRun, fetchTaxonomy } from '@/lib/api';
 import { useFieldQueue } from '@/lib/field/useFieldQueue';
-import { RouteMap, type MapStop } from '@/components/field/RouteMap';
+import { RouteMapView } from '@/components/field/RouteMapView';
+import type { MapStop } from '@/components/field/RouteMap';
 import { Loading, EmptyState } from '@/components/ui';
 
 type Gps = { state: 'acquiring' | 'ok' | 'denied' | 'unavailable'; lat: number | null; lng: number | null };
@@ -143,7 +144,7 @@ export default function CapturePage() {
 
       {/* ── navigation: prev/next stepping + current→next map + directions ── */}
       <div className="rw-card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-2)' }}>
-        <RouteMap stops={mapStops} currentId={stop.id} nextId={nextStop?.id} focus="current" height={170} />
+        <RouteMapView stops={mapStops} currentId={stop.id} nextId={nextStop?.id} focus="current" height={170} />
         <div style={{ display: 'flex', gap: 'var(--rw-space-2)' }}>
           <button
             className="rw-button rw-button--ghost"
