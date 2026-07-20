@@ -45,13 +45,17 @@ Format: `[status] question — context / who owns it`.
       card; on Cloudflare, Pages/Workers-Free/Hyperdrive-Free need **no** card,
       but **R2 and Containers/Workers-Paid require a card** (Cloudflare accepts
       **PayPal**, which may sidestep the AWS issue). — *owner: CTK*
-- [ ] **Cloudflare specifics to confirm before committing** (from infra research):
-      (a) Cloudflare Containers GA status + cold-start/idle behavior vs our SLAs —
-      it's beta-flavored and Workers-Paid-gated; the fallback is hosting the API
-      on Fly/Render and using Cloudflare for edge/R2 only. (b) Next.js via
-      **OpenNext on Workers** (the older next-on-pages is deprecated). (c) Pick the
-      OIDC IdP (Clerk/Auth0/WorkOS) since Cloudflare has no CIAM. R2 needs no code
-      change (existing S3 adapter). — *owner: Dev → CTK*
+- [x] **Prod target chosen: Cloudflare.** Auth IdP: **Clerk** (via generic OIDC
+      adapter). Storage: **R2** (existing S3 adapter, env only — see .env.example).
+      Web: Next.js via **OpenNext on Workers**. DB: **Neon + Hyperdrive**.
+- [ ] **Cloudflare API unreachable from the Claude Code session** — the egress
+      proxy blocks *.cloudflare.com, so provisioning/deploy can't run here. Deploy
+      via **GitHub Actions** (CI can reach Cloudflare; needs `CLOUDFLARE_API_TOKEN`
+      + `CLOUDFLARE_ACCOUNT_ID` repo secrets) or from a local machine. — *owner:
+      Dev + CTK*
+- [ ] **API compute on Cloudflare:** confirm Cloudflare Containers (Workers-Paid,
+      beta) vs hosting the NestJS API on Fly/Render with Cloudflare for edge/R2.
+      Decide once we test cold-start/idle behavior. — *owner: Dev → CTK*
 - [ ] **Azure Blob adapter unverified.** Implemented to the SAS contract but not
       yet run against a live Azure account. Verify (or delete) once an Azure
       account exists. The S3/MinIO path is verified end to end. — *owner: Dev*
