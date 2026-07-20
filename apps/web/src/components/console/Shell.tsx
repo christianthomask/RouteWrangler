@@ -13,6 +13,7 @@ const NAV = [
   { href: '/supervisor', label: 'Dashboard' },
   { href: '/supervisor/exceptions', label: 'Exceptions' },
   { href: '/supervisor/roster', label: 'Roster' },
+  { href: '/supervisor/exports', label: 'Exports' },
 ];
 
 function isActive(pathname: string, href: string): boolean {

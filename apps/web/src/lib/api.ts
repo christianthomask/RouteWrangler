@@ -5,6 +5,10 @@ import {
   DashboardSchema,
   ExceptionDetailSchema,
   ExceptionListResponseSchema,
+  ExportCyclesResponseSchema,
+  ExportListResponseSchema,
+  ExportPreviewSchema,
+  ExportRunViewSchema,
   FieldMeterReadsResponseSchema,
   MeResponseSchema,
   MeterHistoryResponseSchema,
@@ -104,5 +108,33 @@ export const reassignRun = (id: string, readerId: string): Promise<RunDetail> =>
   request(`/runs/${id}/reassign`, RunDetailSchema, { method: 'POST', body: JSON.stringify({ readerId }) });
 export const splitRun = (id: string, req: SplitRequest): Promise<RunDetail> =>
   request(`/runs/${id}/split`, RunDetailSchema, { method: 'POST', body: JSON.stringify(req) });
+
+// ── billing exports (W4) ─────────────────────────────────────────────────────
+export const fetchExportCycles = (clientId: string) =>
+  request(`/exports/cycles?clientId=${clientId}`, ExportCyclesResponseSchema);
+export const fetchExportPreview = (clientId: string, cycleId: string) =>
+  request(`/exports/preview?clientId=${clientId}&cycleId=${encodeURIComponent(cycleId)}`, ExportPreviewSchema);
+export function fetchExports(clientId?: string) {
+  return request(`/exports${clientId ? `?clientId=${clientId}` : ''}`, ExportListResponseSchema);
+}
+export const runExport = (clientId: string, cycleId: string) =>
+  request('/exports', ExportRunViewSchema, { method: 'POST', body: JSON.stringify({ clientId, cycleId }) });
+
+/** Download a stored export file (authenticated) and save it in the browser. */
+export async function downloadExport(id: string, filename: string): Promise<void> {
+  const headers = authHeaders();
+  if (!headers) throw new ApiError(401, 'not signed in');
+  const res = await fetch(`${config.apiBaseUrl}/exports/${id}/download`, { headers });
+  if (!res.ok) throw new ApiError(res.status, `download ${id} → ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 export type { Dashboard, ExceptionDetail, ExceptionListResponse, MeResponse, MeterHistoryResponse, TaxonomyResponse };

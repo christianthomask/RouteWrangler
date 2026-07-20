@@ -16,6 +16,7 @@ import { MetersModule } from './meters/meters.module';
 import { RosterModule } from './roster/roster.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { FieldModule } from './field/field.module';
+import { ExportsModule } from './exports/exports.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { FieldModule } from './field/field.module';
     RosterModule,
     CatalogModule,
     FieldModule,
+    ExportsModule,
   ],
 })
 export class AppModule {}

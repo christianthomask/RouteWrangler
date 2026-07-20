@@ -245,6 +245,12 @@ export const exportRuns = pgTable('export_runs', {
     .references(() => users.id),
   counts: jsonb('counts').notNull().default({}),
   ackNote: text('ack_note'),
+  format: text('format').notNull().default('csv'),
+  filename: text('filename'),
+  // The rendered export is an immutable snapshot of what was sent to the client's
+  // billing system, kept in-row for audit and re-download (fileKey stays for a
+  // future object-storage offload of large bodies — ADR-023).
+  body: text('body'),
   fileKey: text('file_key'),
   supersededByRunId: uuid('superseded_by_run_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
