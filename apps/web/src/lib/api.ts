@@ -7,6 +7,7 @@ import {
   ExceptionListResponseSchema,
   MeResponseSchema,
   MeterHistoryResponseSchema,
+  RereadTasksResponseSchema,
   RosterResponseSchema,
   RouteListResponseSchema,
   RunDetailSchema,
@@ -90,6 +91,7 @@ export function fetchRoutes(clientId?: string) {
   return request(`/routes${clientId ? `?clientId=${clientId}` : ''}`, RouteListResponseSchema);
 }
 export const fetchRun = (id: string) => request(`/runs/${id}`, RunDetailSchema);
+export const fetchRereadTasks = () => request('/reread-tasks', RereadTasksResponseSchema);
 export function fetchRuns(readerId?: string) {
   return request(`/runs${readerId ? `?readerId=${readerId}` : ''}`, RunListResponseSchema);
 }

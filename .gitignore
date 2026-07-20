@@ -31,3 +31,4 @@ test-results/
 
 # drizzle local artifacts
 apps/api/drizzle/meta/_journal.tmp
+scratchpad/

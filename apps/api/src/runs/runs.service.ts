@@ -13,11 +13,12 @@ import type {
   RunDetail,
   RunStatus,
   RunSummary,
+  SkipReasonCode,
   SplitRequest,
 } from '@routewrangler/contracts';
 import { DB } from '../db/db.module';
 import type { Database } from '../db/client';
-import { meters, readEvents, routeRuns, routes, routeStops, runStops } from '../db/schema';
+import { meters, readEvents, routeRuns, routes, routeStops, runStops, skipReasons } from '../db/schema';
 import { AuditService } from '../audit/audit.service';
 import { currentCycleId } from '../catalog/catalog.service';
 import { validateSplit, type StopLite } from './split';
@@ -186,6 +187,23 @@ export class RunsService {
     await this.audit.write({ actorId, action: 'run.split_from', entity: 'route_run', entityId: runId, meta });
     await this.audit.write({ actorId, action: 'run.split_to', entity: 'route_run', entityId: newRunId, meta: { ...meta, fromRunId: runId } });
 
+    return this.detail(runId);
+  }
+
+  /** Skip a stop with a seeded reason (BUILD_SPEC §7.2). Idempotent: only a
+   *  pending stop is skipped; already-read/skipped stops are left as-is. */
+  async skipStop(runId: string, stopId: string, code: SkipReasonCode): Promise<RunDetail> {
+    const [reason] = await this.db
+      .select({ id: skipReasons.id })
+      .from(skipReasons)
+      .where(eq(skipReasons.code, code))
+      .limit(1);
+    if (!reason) throw new NotFoundException('unknown skip reason');
+
+    await this.db
+      .update(runStops)
+      .set({ status: 'skipped', skipReasonId: reason.id, updatedAt: new Date() })
+      .where(and(eq(runStops.id, stopId), eq(runStops.runId, runId), eq(runStops.status, 'pending')));
     return this.detail(runId);
   }
 

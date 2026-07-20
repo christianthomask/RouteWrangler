@@ -1,0 +1,102 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import type { RunDetail, RunStopView } from '@routewrangler/contracts';
+import { fetchRun } from '@/lib/api';
+import { useFieldQueue } from '@/lib/field/useFieldQueue';
+import type { QueuedAction } from '@/lib/field/types';
+import { EmptyState, Loading } from '@/components/ui';
+
+/** Per-stop display state, merging server truth with the local queue. */
+function stopState(stop: RunStopView, action: QueuedAction | undefined): { label: string; color: string; done: boolean } {
+  if (stop.status === 'read') return { label: 'Read', color: 'var(--rw-sync-synced)', done: true };
+  if (stop.status === 'skipped') return { label: 'Skipped', color: 'var(--rw-warning)', done: true };
+  if (action) {
+    const map: Record<string, string> = {
+      pending: 'Queued',
+      syncing: 'Syncing',
+      synced: 'Synced',
+      failed: 'Failed',
+    };
+    const color =
+      action.state === 'failed'
+        ? 'var(--rw-sync-failed)'
+        : action.state === 'synced'
+          ? 'var(--rw-sync-synced)'
+          : 'var(--rw-sync-pending)';
+    return { label: map[action.state]!, color, done: action.state === 'synced' };
+  }
+  return { label: 'Pending', color: 'var(--rw-text-muted)', done: false };
+}
+
+export default function FieldRunPage() {
+  const { id } = useParams<{ id: string }>();
+  const [run, setRun] = useState<RunDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { actions } = useFieldQueue();
+
+  useEffect(() => {
+    fetchRun(id)
+      .then(setRun)
+      .catch((e) => setError(e instanceof Error ? e.message : 'failed'));
+  }, [id]);
+
+  if (error) return <EmptyState title="Couldn't load this run" hint={error} />;
+  if (!run) return <Loading />;
+
+  const actionByStop = new Map<string, QueuedAction>();
+  for (const a of actions) {
+    const stopId = a.read?.runStopId ?? a.skip?.stopId;
+    if (stopId) actionByStop.set(stopId, a);
+  }
+
+  const done = run.stops.filter((s) => stopState(s, actionByStop.get(s.id)).done).length;
+  const pct = run.stops.length ? Math.round((done / run.stops.length) * 100) : 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-4)' }}>
+      <div>
+        <Link href="/field" style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)' }}>← Today</Link>
+        <h1 style={{ fontSize: 'var(--rw-text-xl)', margin: '6px 0 0' }}>Run · {run.runDate}</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+          <div style={{ flex: 1, height: 8, background: 'var(--rw-surface-3)', borderRadius: 999 }}>
+            <div style={{ width: `${pct}%`, height: '100%', background: 'var(--rw-brand)', borderRadius: 999 }} />
+          </div>
+          <span className="tabular" style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)' }}>{done}/{run.stops.length}</span>
+        </div>
+      </div>
+
+      <div className="rw-card" style={{ padding: 0 }}>
+        <div className="rw-rows">
+          {run.stops.map((s) => {
+            const st = stopState(s, actionByStop.get(s.id));
+            const tappable = !st.done && st.label !== 'Syncing';
+            const inner = (
+              <>
+                <span className="tabular" style={{ color: 'var(--rw-text-muted)', width: 26, flex: 'none' }}>{s.sequence + 1}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500 }}>{s.meterSerial}</div>
+                  <div style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)' }}>
+                    last read {s.lastValue ?? '—'}
+                  </div>
+                </span>
+                <span style={{ color: st.color, fontSize: 'var(--rw-text-xs)', fontWeight: 600, textTransform: 'uppercase' }}>{st.label}</span>
+              </>
+            );
+            return tappable ? (
+              <Link key={s.id} href={`/field/runs/${id}/stops/${s.id}`} className="rw-row" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, textDecoration: 'none', color: 'inherit' }}>
+                {inner}
+              </Link>
+            ) : (
+              <div key={s.id} className="rw-row" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, cursor: 'default' }}>
+                {inner}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}

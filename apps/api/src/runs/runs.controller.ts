@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post,
 import {
   AssignRunRequestSchema,
   ReassignRequestSchema,
+  SkipStopRequestSchema,
   SplitRequestSchema,
   type RunDetail,
   type RunListResponse,
@@ -59,5 +60,17 @@ export class RunsController {
     const parsed = SplitRequestSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     return this.runs.split(id, parsed.data, user.id);
+  }
+
+  /** POST /runs/:id/stops/:stopId/skip — reader skips a stop with a reason. */
+  @Post(':id/stops/:stopId/skip')
+  skip(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('stopId', ParseUUIDPipe) stopId: string,
+    @Body() body: unknown,
+  ): Promise<RunDetail> {
+    const parsed = SkipStopRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.runs.skipStop(id, stopId, parsed.data.skipReasonCode);
   }
 }

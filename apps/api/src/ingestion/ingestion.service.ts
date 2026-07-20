@@ -9,7 +9,7 @@ import {
 } from '@routewrangler/contracts';
 import { DB } from '../db/db.module';
 import type { Database } from '../db/client';
-import { exceptions, meters, readEvents, runStops } from '../db/schema';
+import { exceptions, meters, readEvents, rereadTasks, runStops } from '../db/schema';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import { runValidation } from '../validation/engine';
 import type { PriorRead } from '../validation/types';
@@ -136,13 +136,18 @@ export class IngestionService {
         .where(and(eq(runStops.id, ev.runStopId), eq(runStops.status, 'pending')));
     }
 
-    // A reread answering an exception advances it to reread_received (W4). The
-    // supervisor then compares side-by-side and resolves.
+    // A reread answering an exception advances it to reread_received (W4) and
+    // marks the reader's reread task done. The supervisor then compares
+    // side-by-side and resolves.
     if (ev.exceptionId) {
       await this.db
         .update(exceptions)
         .set({ status: 'reread_received', updatedAt: new Date() })
         .where(eq(exceptions.id, ev.exceptionId));
+      await this.db
+        .update(rereadTasks)
+        .set({ status: 'done', updatedAt: new Date() })
+        .where(and(eq(rereadTasks.exceptionId, ev.exceptionId), eq(rereadTasks.readerId, ev.readerId)));
     }
 
     if (result.exceptions.length > 0) {
