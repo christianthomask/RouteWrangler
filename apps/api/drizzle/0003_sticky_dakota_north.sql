@@ -1,0 +1,1 @@
+ALTER TABLE "read_events" ADD COLUMN "note" text;

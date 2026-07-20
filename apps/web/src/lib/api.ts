@@ -5,6 +5,7 @@ import {
   DashboardSchema,
   ExceptionDetailSchema,
   ExceptionListResponseSchema,
+  FieldMeterReadsResponseSchema,
   MeResponseSchema,
   MeterHistoryResponseSchema,
   RereadTasksResponseSchema,
@@ -92,6 +93,8 @@ export function fetchRoutes(clientId?: string) {
 }
 export const fetchRun = (id: string) => request(`/runs/${id}`, RunDetailSchema);
 export const fetchRereadTasks = () => request('/reread-tasks', RereadTasksResponseSchema);
+export const fetchFieldMeterReads = (meterId: string) =>
+  request(`/field/meters/${meterId}/reads`, FieldMeterReadsResponseSchema);
 export function fetchRuns(readerId?: string) {
   return request(`/runs${readerId ? `?readerId=${readerId}` : ''}`, RunListResponseSchema);
 }

@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import type { RunDetail, RunStopView } from '@routewrangler/contracts';
+import { useRouter } from 'next/navigation';
 import { fetchRun } from '@/lib/api';
 import { useFieldQueue } from '@/lib/field/useFieldQueue';
 import type { QueuedAction } from '@/lib/field/types';
+import { RouteMap, type MapStop } from '@/components/field/RouteMap';
 import { EmptyState, Loading } from '@/components/ui';
 
 /** Per-stop display state, merging server truth with the local queue. */
@@ -33,6 +35,7 @@ function stopState(stop: RunStopView, action: QueuedAction | undefined): { label
 
 export default function FieldRunPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { actions } = useFieldQueue();
@@ -55,6 +58,14 @@ export default function FieldRunPage() {
   const done = run.stops.filter((s) => stopState(s, actionByStop.get(s.id)).done).length;
   const pct = run.stops.length ? Math.round((done / run.stops.length) * 100) : 0;
 
+  const ordered = [...run.stops].sort((a, b) => a.sequence - b.sequence);
+  const currentStop = ordered.find((s) => !stopState(s, actionByStop.get(s.id)).done);
+  const mapStops: MapStop[] = ordered.map((s) => {
+    const st = stopState(s, actionByStop.get(s.id));
+    const tone: MapStop['tone'] = s.status === 'skipped' ? 'skipped' : st.done ? 'done' : 'pending';
+    return { id: s.id, sequence: s.sequence, lat: s.lat, lng: s.lng, tone };
+  });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-4)' }}>
       <div>
@@ -66,6 +77,16 @@ export default function FieldRunPage() {
           </div>
           <span className="tabular" style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)' }}>{done}/{run.stops.length}</span>
         </div>
+      </div>
+
+      <div className="rw-card">
+        <RouteMap
+          stops={mapStops}
+          currentId={currentStop?.id}
+          focus="route"
+          height={200}
+          onSelect={(sid) => router.push(`/field/runs/${id}/stops/${sid}`)}
+        />
       </div>
 
       <div className="rw-card" style={{ padding: 0 }}>

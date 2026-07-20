@@ -110,6 +110,7 @@ export class MetersService {
       lng: r.lng,
       billable: r.billable,
       annotations: (r.annotations ?? {}) as Record<string, unknown>,
+      note: r.note ?? null,
       photoUrl,
     };
   }

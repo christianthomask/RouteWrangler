@@ -105,6 +105,7 @@ export class IngestionService {
         lat: ev.lat ?? null,
         lng: ev.lng ?? null,
         photoKey: ev.photoKey ?? null,
+        note: ev.note?.trim() ? ev.note.trim() : null,
         annotations: result.annotations,
         consumption: result.effectiveConsumption,
         billable: result.billable,

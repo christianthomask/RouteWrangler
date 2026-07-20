@@ -154,6 +154,9 @@ export const readEvents = pgTable('read_events', {
   lat: doublePrecision('lat'),
   lng: doublePrecision('lng'),
   photoKey: text('photo_key'),
+  // Reader's free-text note, captured with the read. Immutable like the rest of
+  // the event (ADR-002) — set at insert, never updated.
+  note: text('note'),
   annotations: jsonb('annotations').notNull().default({}),
   /** consumption computed at ingest (value − prior), for history/baseline. */
   consumption: doublePrecision('consumption'),

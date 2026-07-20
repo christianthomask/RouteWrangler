@@ -17,6 +17,7 @@ export const RunStopViewSchema = z.object({
   sequence: z.number().int(),
   status: RunStopStatusSchema,
   meterSerial: z.string(),
+  serviceAddress: z.string(),
   registerDials: z.number().int().positive(),
   lat: z.number().nullable(),
   lng: z.number().nullable(),

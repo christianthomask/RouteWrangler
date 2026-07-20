@@ -102,6 +102,7 @@ class FieldQueue {
               sourceType: 'manual' as const,
               lat: a.read.lat,
               lng: a.read.lng,
+              note: a.read.note ?? undefined,
               exceptionId: a.read.exceptionId ?? undefined,
             };
             const res = await fetch(`${config.apiBaseUrl}/ingest/read-events`, {

@@ -11,6 +11,8 @@ export interface ReadPayload {
   capturedAt: string;
   lat: number | null;
   lng: number | null;
+  /** Reader's free-text note, captured with the read (immutable once ingested). */
+  note?: string | null;
   exceptionId?: string | null;
   /** Optional local photo (data URL); uploaded best-effort after the read lands. */
   photoDataUrl?: string | null;

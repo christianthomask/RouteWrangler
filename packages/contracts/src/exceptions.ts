@@ -64,6 +64,8 @@ export const ReadEventViewSchema = z.object({
   lng: z.number().nullable(),
   billable: z.boolean(),
   annotations: z.record(z.unknown()),
+  /** Reader's note captured with the read, if any. */
+  note: z.string().nullable(),
   /** Presigned GET URL for the photo, when one is attached and storage is up. */
   photoUrl: z.string().nullable(),
 });

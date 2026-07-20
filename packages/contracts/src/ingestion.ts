@@ -24,6 +24,8 @@ export const ReadEventInputSchema = z.object({
   lat: z.number().nullable().optional(),
   lng: z.number().nullable().optional(),
   photoKey: z.string().nullable().optional(),
+  /** Reader's free-text note captured with the read — immutable once ingested. */
+  note: z.string().max(1000).nullable().optional(),
   /** For a reread: the exception this event answers (W4). */
   exceptionId: z.string().uuid().nullable().optional(),
 });

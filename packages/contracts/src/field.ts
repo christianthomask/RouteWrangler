@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ExceptionCodeSchema, SkipReasonCodeSchema } from './validation';
+import { SourceTypeSchema } from './ingestion';
 
 export const RereadTaskStatusSchema = z.enum(['issued', 'delivered', 'done']);
 export type RereadTaskStatus = z.infer<typeof RereadTaskStatusSchema>;
@@ -26,3 +27,22 @@ export type RereadTasksResponse = z.infer<typeof RereadTasksResponseSchema>;
 /** Skip a stop with a seeded reason (BUILD_SPEC §7.2, W5). */
 export const SkipStopRequestSchema = z.object({ skipReasonCode: SkipReasonCodeSchema });
 export type SkipStopRequest = z.infer<typeof SkipStopRequestSchema>;
+
+/** A prior read shown to the reader in the field, most-recent first. */
+export const FieldReadSchema = z.object({
+  id: z.string().uuid(),
+  value: z.number(),
+  consumption: z.number().nullable(),
+  capturedAt: z.string(),
+  sourceType: SourceTypeSchema,
+  readerName: z.string(),
+  note: z.string().nullable(),
+});
+export type FieldRead = z.infer<typeof FieldReadSchema>;
+
+/** Meter context for the field stop screen: standing access notes + read history. */
+export const FieldMeterReadsResponseSchema = z.object({
+  accessNotes: z.string().nullable(),
+  reads: z.array(FieldReadSchema),
+});
+export type FieldMeterReadsResponse = z.infer<typeof FieldMeterReadsResponseSchema>;
