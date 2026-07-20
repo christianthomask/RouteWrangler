@@ -31,6 +31,12 @@ export const SEED_USERS: SeedUser[] = [
     displayName: 'Field Reader One',
     role: 'reader',
   },
+  {
+    username: 'reader2',
+    email: 'reader2@example.com',
+    displayName: 'Field Reader Two',
+    role: 'reader',
+  },
 ];
 
 /** Deterministic placeholder sub used only in local-only seeding (no pool). */

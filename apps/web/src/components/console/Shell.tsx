@@ -12,6 +12,7 @@ import { signOut, isSignedIn } from '@/lib/session';
 const NAV = [
   { href: '/supervisor', label: 'Dashboard' },
   { href: '/supervisor/exceptions', label: 'Exceptions' },
+  { href: '/supervisor/roster', label: 'Roster' },
 ];
 
 function isActive(pathname: string, href: string): boolean {

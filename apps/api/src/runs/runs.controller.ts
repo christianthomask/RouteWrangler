@@ -1,5 +1,13 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
-import type { RunDetail, RunListResponse, RunStatus } from '@routewrangler/contracts';
+import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import {
+  AssignRunRequestSchema,
+  ReassignRequestSchema,
+  SplitRequestSchema,
+  type RunDetail,
+  type RunListResponse,
+  type RunStatus,
+} from '@routewrangler/contracts';
+import { Roles } from '../auth/roles.decorator';
 import { CurrentUser, type AuthUser } from '../auth/current-user';
 import { RunsService } from './runs.service';
 
@@ -26,5 +34,30 @@ export class RunsController {
   @Get(':id')
   detail(@Param('id', ParseUUIDPipe) id: string): Promise<RunDetail> {
     return this.runs.detail(id);
+  }
+
+  /** POST /runs — supervisor-owned assignment (W1). */
+  @Roles('supervisor', 'admin')
+  @Post()
+  assign(@Body() body: unknown, @CurrentUser() user: AuthUser): Promise<RunDetail> {
+    const parsed = AssignRunRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.runs.assign(parsed.data, user.id);
+  }
+
+  @Roles('supervisor', 'admin')
+  @Post(':id/reassign')
+  reassign(@Param('id', ParseUUIDPipe) id: string, @Body() body: unknown, @CurrentUser() user: AuthUser): Promise<RunDetail> {
+    const parsed = ReassignRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.runs.reassign(id, parsed.data, user.id);
+  }
+
+  @Roles('supervisor', 'admin')
+  @Post(':id/split')
+  split(@Param('id', ParseUUIDPipe) id: string, @Body() body: unknown, @CurrentUser() user: AuthUser): Promise<RunDetail> {
+    const parsed = SplitRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.runs.split(id, parsed.data, user.id);
   }
 }

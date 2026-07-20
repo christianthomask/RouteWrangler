@@ -14,3 +14,5 @@ export * from './runs';
 export * from './exceptions';
 export * from './dashboard';
 export * from './meter-history';
+export * from './roster';
+export * from './assignment';

@@ -1,18 +1,38 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
-import type { RunDetail, RunStatus, RunSummary } from '@routewrangler/contracts';
+import type {
+  AssignRunRequest,
+  ReassignRequest,
+  RunDetail,
+  RunStatus,
+  RunSummary,
+  SplitRequest,
+} from '@routewrangler/contracts';
 import { DB } from '../db/db.module';
 import type { Database } from '../db/client';
-import { meters, readEvents, routeRuns, runStops } from '../db/schema';
+import { meters, readEvents, routeRuns, routes, routeStops, runStops } from '../db/schema';
+import { AuditService } from '../audit/audit.service';
+import { currentCycleId } from '../catalog/catalog.service';
+import { validateSplit, type StopLite } from './split';
 
 /**
- * Minimal run reads for Sprint 1 — enough for the simulator's playback client to
- * fetch its worklist over the public API (no privileged DB access). Full run
- * lifecycle (materialization, splits, close-out) is Sprint 3.
+ * Run reads (Sprint 1) + assignment lifecycle (W1, ADR-005): materialize a run
+ * from a route, reassign before it starts, and split a contiguous range of
+ * pending stops to another reader. Every mutation is audited.
  */
 @Injectable()
 export class RunsService {
-  constructor(@Inject(DB) private readonly db: Database) {}
+  constructor(
+    @Inject(DB) private readonly db: Database,
+    private readonly audit: AuditService,
+  ) {}
 
   async list(filter: { readerId?: string; status?: RunStatus }): Promise<RunSummary[]> {
     const conds = [];
@@ -62,6 +82,111 @@ export class RunsService {
         lastValue: lastValues.get(s.meterId) ?? null,
       })),
     };
+  }
+
+  // ── assignment lifecycle (W1) ────────────────────────────────────────────
+
+  /** Assign a reader to a route → materialize a dated run + its pending stops. */
+  async assign(req: AssignRunRequest, actorId: string): Promise<RunDetail> {
+    const [route] = await this.db.select().from(routes).where(eq(routes.id, req.routeId)).limit(1);
+    if (!route) throw new NotFoundException('route not found');
+
+    const runDate = req.runDate ?? new Date().toISOString().slice(0, 10);
+    const cycleId = req.cycleId ?? currentCycleId(new Date(runDate));
+    const runId = randomUUID();
+
+    await this.db.insert(routeRuns).values({
+      id: runId,
+      routeId: route.id,
+      clientId: route.clientId,
+      readerId: req.readerId,
+      runDate,
+      cycleId,
+      status: 'open',
+    });
+
+    const stops = await this.db
+      .select()
+      .from(routeStops)
+      .where(eq(routeStops.routeId, route.id))
+      .orderBy(asc(routeStops.sequence));
+    if (stops.length) {
+      await this.db.insert(runStops).values(
+        stops.map((s) => ({ runId, meterId: s.meterId, sequence: s.sequence, status: 'pending' as const })),
+      );
+    }
+
+    await this.audit.write({
+      actorId,
+      action: 'run.assigned',
+      entity: 'route_run',
+      entityId: runId,
+      meta: { routeId: route.id, readerId: req.readerId, runDate, cycleId, stops: stops.length },
+    });
+    return this.detail(runId);
+  }
+
+  /** Reassign a run's reader — only before it starts (no reads yet). */
+  async reassign(runId: string, req: ReassignRequest, actorId: string): Promise<RunDetail> {
+    const [run] = await this.db.select().from(routeRuns).where(eq(routeRuns.id, runId)).limit(1);
+    if (!run) throw new NotFoundException('run not found');
+
+    const worked = await this.db
+      .select({ status: runStops.status })
+      .from(runStops)
+      .where(and(eq(runStops.runId, runId), inArray(runStops.status, ['read', 'skipped'])))
+      .limit(1);
+    if (worked.length) {
+      throw new ConflictException('run has already started — mid-run changes use a split');
+    }
+
+    await this.db
+      .update(routeRuns)
+      .set({ readerId: req.readerId, updatedAt: new Date() })
+      .where(eq(routeRuns.id, runId));
+    await this.audit.write({
+      actorId,
+      action: 'run.reassigned',
+      entity: 'route_run',
+      entityId: runId,
+      meta: { readerId: req.readerId },
+    });
+    return this.detail(runId);
+  }
+
+  /** Split a contiguous range of pending stops into a new run (ADR-005). */
+  async split(runId: string, req: SplitRequest, actorId: string): Promise<RunDetail> {
+    const [run] = await this.db.select().from(routeRuns).where(eq(routeRuns.id, runId)).limit(1);
+    if (!run) throw new NotFoundException('run not found');
+
+    const stopRows = await this.db.select().from(runStops).where(eq(runStops.runId, runId));
+    const lite: StopLite[] = stopRows.map((s) => ({ id: s.id, sequence: s.sequence, status: s.status }));
+    const check = validateSplit(lite, req.stopIds);
+    if (!check.ok) throw new BadRequestException(check.error);
+
+    const newRunId = randomUUID();
+    await this.db.insert(routeRuns).values({
+      id: newRunId,
+      routeId: run.routeId,
+      clientId: run.clientId,
+      readerId: req.toReaderId,
+      runDate: run.runDate,
+      cycleId: run.cycleId,
+      status: 'open',
+      splitFromRunId: runId,
+    });
+
+    // Re-parent only the pending stops (double-guarded on status).
+    await this.db
+      .update(runStops)
+      .set({ runId: newRunId, updatedAt: new Date() })
+      .where(and(inArray(runStops.id, req.stopIds), eq(runStops.status, 'pending')));
+
+    const meta = { toReaderId: req.toReaderId, movedStops: req.stopIds.length, newRunId };
+    await this.audit.write({ actorId, action: 'run.split_from', entity: 'route_run', entityId: runId, meta });
+    await this.audit.write({ actorId, action: 'run.split_to', entity: 'route_run', entityId: newRunId, meta: { ...meta, fromRunId: runId } });
+
+    return this.detail(runId);
   }
 
   /** Latest read value per meter (one query, distinct-on). */

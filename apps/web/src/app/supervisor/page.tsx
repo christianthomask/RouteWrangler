@@ -61,7 +61,7 @@ export default function DashboardPage() {
           <div className="rw-card" style={{ padding: 0 }}>
             <div className="rw-rows">
               {data.runs.map((r) => (
-                <div key={r.runId} className="rw-row" style={{ cursor: 'default' }}>
+                <Link key={r.runId} href={`/supervisor/runs/${r.runId}`} className="rw-row" style={{ textDecoration: 'none', color: 'inherit' }}>
                   <div className="rw-row__top">
                     <strong>{r.routeName}</strong>
                     <span className="tabular" style={{ color: 'var(--rw-text-muted)' }}>{r.completionPct}%</span>
@@ -76,7 +76,7 @@ export default function DashboardPage() {
                   <div style={{ height: 6, background: 'var(--rw-surface-3)', borderRadius: 999, marginTop: 2 }}>
                     <div style={{ width: `${r.completionPct}%`, height: '100%', background: 'var(--rw-brand)', borderRadius: 999 }} />
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           </div>

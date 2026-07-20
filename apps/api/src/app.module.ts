@@ -13,6 +13,8 @@ import { PhotosModule } from './photos/photos.module';
 import { ExceptionsModule } from './exceptions/exceptions.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { MetersModule } from './meters/meters.module';
+import { RosterModule } from './roster/roster.module';
+import { CatalogModule } from './catalog/catalog.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { MetersModule } from './meters/meters.module';
     ExceptionsModule,
     DashboardModule,
     MetersModule,
+    RosterModule,
+    CatalogModule,
   ],
 })
 export class AppModule {}
