@@ -108,6 +108,10 @@ class FieldQueue {
     // session's synced rows stay live so the run view can still show "Synced".
     await Promise.all(all.filter((a) => a.state === 'synced').map((a) => deleteAction(a.id)));
     this.mirror = all.filter((a) => a.state !== 'synced');
+    // Seed the sequence counter from everything on disk — including the synced
+    // rows just pruned — so a new action can never reuse a number from this
+    // device's history.
+    this.seqCounter = all.reduce((m, a) => Math.max(m, a.seq), 0);
 
     this.loaded = true;
     this.emit();
@@ -121,8 +125,19 @@ class FieldQueue {
     return counts(this.mirror);
   }
 
+  /**
+   * Monotonic within the session, seeded from disk on load.
+   *
+   * Deliberately a counter rather than `max(mirror.seq) + 1`: `persist()` only
+   * appends to `this.mirror` *after* awaiting the IndexedDB write, so two
+   * enqueues overlapping across that await would both observe the same maximum
+   * and be assigned the same seq — two captures sharing an ordering key. The
+   * increment here is synchronous, so no await can interleave.
+   */
+  private seqCounter = 0;
+
   private nextSeq() {
-    return this.mirror.reduce((m, a) => Math.max(m, a.seq), 0) + 1;
+    return ++this.seqCounter;
   }
 
   private async persist(a: QueuedAction) {

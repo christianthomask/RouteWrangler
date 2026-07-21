@@ -13,8 +13,16 @@ import { ExceptionCodeSchema } from './validation';
 export const ExportFormatSchema = z.enum(['csv']);
 export type ExportFormat = z.infer<typeof ExportFormatSchema>;
 
-/** Why a meter is not in the billable file. */
-export const HoldReasonSchema = z.enum(['blocking_exception', 'not_read']);
+/**
+ * Why a meter is not in the billable file.
+ *
+ * `skipped` is distinct from `not_read` on purpose: a stop the reader
+ * deliberately skipped with a reason (locked gate, dog, no access) is an
+ * answered question, whereas `not_read` is simply unworked. Collapsing them
+ * leaves the client unable to reconcile — they can't tell which meters need
+ * another visit from which were already adjudicated in the field.
+ */
+export const HoldReasonSchema = z.enum(['blocking_exception', 'not_read', 'skipped']);
 export type HoldReason = z.infer<typeof HoldReasonSchema>;
 
 export const ExportHoldSchema = z.object({
@@ -24,13 +32,18 @@ export const ExportHoldSchema = z.object({
   reason: HoldReasonSchema,
   /** The blocking exception's code, when the hold is an exception. */
   exceptionCode: ExceptionCodeSchema.nullable(),
+  /** The reader's reason, when the hold is a skip. Null otherwise. */
+  skipReasonCode: z.string().nullable(),
 });
 export type ExportHold = z.infer<typeof ExportHoldSchema>;
 
 export const ExportCountsSchema = z.object({
   billable: z.number().int().nonnegative(),
   held: z.number().int().nonnegative(),
+  /** Stops with no read and no skip reason — unworked. */
   missing: z.number().int().nonnegative(),
+  /** Stops the reader skipped with a reason — worked, but not readable. */
+  skipped: z.number().int().nonnegative(),
 });
 export type ExportCounts = z.infer<typeof ExportCountsSchema>;
 

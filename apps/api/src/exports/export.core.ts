@@ -24,6 +24,12 @@ export interface StopRow {
   consumption: number | null;
   readAt: string | null; // ISO
   /**
+   * The reader's skip reason, when they deliberately skipped this stop. Null
+   * for a stop that was simply never worked — the two are reported separately
+   * so the client can tell "we tried, here's why" from "nobody got to it".
+   */
+  skipReasonCode: string | null;
+  /**
    * Every exception on the effective read (a single read routinely has ≥2 —
    * one consumption finding plus independent findings). Billability is decided
    * over the whole set here, never by fanning the stop into one row per
@@ -55,7 +61,11 @@ export function classify(rows: StopRow[]): Classification {
 
   for (const r of rows) {
     if (r.readValue == null || r.readAt == null) {
-      holds.push(hold(r, 'not_read', null));
+      // A deliberate skip carries its reason through to the client; an unworked
+      // stop stays `not_read`. Same billing outcome, different follow-up.
+      holds.push(
+        r.skipReasonCode ? hold(r, 'skipped', null) : hold(r, 'not_read', null),
+      );
       continue;
     }
     // A read is held iff ANY of its exceptions still blocks billing (not yet
@@ -76,10 +86,13 @@ export function classify(rows: StopRow[]): Classification {
   }
 
   const missing = holds.filter((h) => h.reason === 'not_read').length;
+  const skipped = holds.filter((h) => h.reason === 'skipped').length;
   return {
     billable,
     holds,
-    counts: { billable: billable.length, held: holds.length - missing, missing },
+    // `held` is exception-blocked only — the other two reasons are counted
+    // separately, so the three always partition `holds`.
+    counts: { billable: billable.length, held: holds.length - missing - skipped, missing, skipped },
   };
 }
 
@@ -91,6 +104,7 @@ function hold(r: StopRow, reason: HoldReason, exceptionCode: string | null): Exp
     reason,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     exceptionCode: exceptionCode as any,
+    skipReasonCode: reason === 'skipped' ? r.skipReasonCode : null,
   };
 }
 

@@ -37,8 +37,13 @@ export function derive(input: ValidationInput): Derived {
     (baseline === null || rolloverConsumption <= baseline * config.rolloverBandMultiplier);
   const effective = rolloverInBand ? rolloverConsumption! : (rawDelta ?? 0);
 
-  const recentConsumptions = [
-    ...history.map((h) => h.consumption).filter((c): c is number => c !== null),
+  // Nulls are PRESERVED here (unlike the baseline above, which excludes them):
+  // this is a positional series, not a sample. Filtering gaps out would close
+  // the hole and splice two separate zero runs into one apparently unbroken
+  // streak — a meter with no reading is not a meter reading zero. Rules that
+  // walk this series must treat a null as a break.
+  const recentConsumptions: (number | null)[] = [
+    ...history.map((h) => h.consumption),
     effective,
   ];
 

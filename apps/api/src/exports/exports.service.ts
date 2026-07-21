@@ -18,6 +18,7 @@ import {
   readEvents,
   routeRuns,
   runStops,
+  skipReasons,
   users,
 } from '../db/schema';
 import { AuditService } from '../audit/audit.service';
@@ -194,11 +195,15 @@ export class ExportsService {
         readValue: readEvents.value,
         consumption: readEvents.consumption,
         readAt: readEvents.capturedAt,
+        skipReasonCode: skipReasons.code,
       })
       .from(runStops)
       .innerJoin(routeRuns, eq(runStops.runId, routeRuns.id))
       .innerJoin(meters, eq(runStops.meterId, meters.id))
       .leftJoin(readEvents, eq(runStops.completedReadEventId, readEvents.id))
+      // left: only skipped stops have a reason, and the export reports it so a
+      // deliberate skip reads differently from an unworked stop.
+      .leftJoin(skipReasons, eq(runStops.skipReasonId, skipReasons.id))
       .where(and(eq(routeRuns.clientId, clientId), eq(routeRuns.cycleId, cycleId)));
 
     const readIds = base.map((b) => b.completedReadId).filter((id): id is string => id != null);
@@ -250,6 +255,7 @@ export class ExportsService {
         readValue: cert ? cert.value : b.readValue,
         consumption: cert ? cert.consumption : b.consumption,
         readAt: cert ? cert.readAt : b.readAt ? b.readAt.toISOString() : null,
+        skipReasonCode: b.skipReasonCode,
         exceptions: exs.map((e) => ({
           code: e.code,
           status: e.status,
@@ -308,7 +314,14 @@ type Row = {
 };
 
 function toView(r: Row): ExportRunView {
-  const counts = (r.counts ?? {}) as { billable?: number; held?: number; missing?: number };
+  // Every field optional: this is jsonb persisted by older code, so a row may
+  // predate any given counter.
+  const counts = (r.counts ?? {}) as {
+    billable?: number;
+    held?: number;
+    missing?: number;
+    skipped?: number;
+  };
   return {
     id: r.id,
     clientId: r.clientId,
@@ -322,6 +335,9 @@ function toView(r: Row): ExportRunView {
       billable: counts.billable ?? 0,
       held: counts.held ?? 0,
       missing: counts.missing ?? 0,
+      // Export runs recorded before skips were counted separately have no
+      // `skipped` key; their skips are already inside `missing`.
+      skipped: counts.skipped ?? 0,
     },
     superseded: r.supersededByRunId != null,
   };

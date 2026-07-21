@@ -38,8 +38,12 @@ export interface Derived {
   /** Mean of prior positive consumptions over the window (null if too few). */
   baseline: number | null;
   hasBaseline: boolean;
-  /** Recent consumptions oldest-first incl. the current effective value. */
-  recentConsumptions: number[];
+  /**
+   * Recent consumptions oldest-first incl. the current effective value.
+   * Positional: `null` marks a gap (a read with no computable consumption) and
+   * is kept in place so streak rules see the break instead of a closed-up run.
+   */
+  recentConsumptions: (number | null)[];
 }
 
 /** A rule fires with an exception, an annotation-only (billable) outcome, or not. */

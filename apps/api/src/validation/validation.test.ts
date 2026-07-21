@@ -95,6 +95,35 @@ describe('validation engine — every rule has a scenario that trips it', () => 
     expect(r.exceptions).toEqual(['zero_consumption_streak']);
   });
 
+  it('zero_consumption_streak: a null gap breaks the streak → no exception', () => {
+    // Same shape as the streak above, but the middle cycle has no computable
+    // consumption (a gap in the history). Collapsing that gap would splice one
+    // zero either side of it into an unbroken run of three; a meter with no
+    // reading is not a meter reading zero, so the streak must NOT fire.
+    const history: PriorRead[] = [
+      { value: 2000, consumption: 100 },
+      { value: 2100, consumption: 0 },
+      { value: 2100, consumption: null },
+      { value: 2100, consumption: 0 },
+    ];
+    const r = runValidation(input({ value: 2100, history })); // current delta 0
+    expect(r.exceptions).toEqual([]);
+    expect(r.billable).toBe(true);
+  });
+
+  it('zero_consumption_streak: a gap older than the window does not suppress a real streak', () => {
+    // The gap sits outside the trailing N cycles, so the three most recent
+    // cycles are still genuinely consecutive zeros and the rule fires.
+    const history: PriorRead[] = [
+      { value: 2000, consumption: null },
+      { value: 2100, consumption: 100 },
+      { value: 2100, consumption: 0 },
+      { value: 2100, consumption: 0 },
+    ];
+    const r = runValidation(input({ value: 2100, history }));
+    expect(r.exceptions).toEqual(['zero_consumption_streak']);
+  });
+
   it('a single zero is not yet a streak → billable, no exception', () => {
     const history: PriorRead[] = [...steadyHistory(3), { value: 2100, consumption: 100 }];
     const r = runValidation(input({ value: 2100, history }));

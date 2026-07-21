@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, notExists, sql, type SQL } from 'drizzle-orm';
 import type {
   AssignRunRequest,
   ReassignRequest,
@@ -201,19 +201,37 @@ export class RunsService {
     const [run] = await this.db.select().from(routeRuns).where(eq(routeRuns.id, runId)).limit(1);
     if (!run) throw new NotFoundException('run not found');
 
-    const worked = await this.db
-      .select({ status: runStops.status })
-      .from(runStops)
-      .where(and(eq(runStops.runId, runId), inArray(runStops.status, ['read', 'skipped'])))
-      .limit(1);
-    if (worked.length) {
+    /*
+     * The "has it started?" test is folded into the UPDATE's WHERE rather than
+     * run as a separate SELECT first. Checking and then updating leaves a
+     * window in which the reader submits their first read — the check passes,
+     * the reassign lands, and the run is now owned by someone else with a read
+     * already against it. As one statement the guard is evaluated atomically
+     * with the write, so a concurrent read either precedes it (0 rows updated →
+     * conflict) or follows it. Two supervisors reassigning at once likewise
+     * serialize: both succeed, last write wins, which is the same outcome as
+     * doing it sequentially.
+     */
+    const updated = await this.db
+      .update(routeRuns)
+      .set({ readerId: req.readerId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(routeRuns.id, runId),
+          notExists(
+            this.db
+              .select({ one: sql`1` })
+              .from(runStops)
+              .where(and(eq(runStops.runId, runId), inArray(runStops.status, ['read', 'skipped']))),
+          ),
+        ),
+      )
+      .returning({ id: routeRuns.id });
+
+    if (updated.length === 0) {
       throw new ConflictException('run has already started — mid-run changes use a split');
     }
 
-    await this.db
-      .update(routeRuns)
-      .set({ readerId: req.readerId, updatedAt: new Date() })
-      .where(eq(routeRuns.id, runId));
     await this.audit.write({
       actorId,
       action: req.readerId ? 'run.reassigned' : 'run.released',
@@ -235,22 +253,48 @@ export class RunsService {
     if (!check.ok) throw new BadRequestException(check.error);
 
     const newRunId = randomUUID();
-    await this.db.insert(routeRuns).values({
-      id: newRunId,
-      routeId: run.routeId,
-      clientId: run.clientId,
-      readerId: req.toReaderId,
-      runDate: run.runDate,
-      cycleId: run.cycleId,
-      status: 'open',
-      splitFromRunId: runId,
-    });
+    /*
+     * Creating the run and re-parenting its stops must be one unit: a failure
+     * between them would leave an empty orphan run, and the stops stranded on
+     * the original.
+     *
+     * The moved-count check closes a subtler race. The status guard below stops
+     * a read that lands after validateSplit from being moved — but silently, so
+     * the new reader would simply be handed fewer stops than the supervisor
+     * selected, with nobody told. Comparing the count against the request turns
+     * that into a rollback and a conflict the caller can act on.
+     */
+    await this.db.transaction(async (tx) => {
+      await tx.insert(routeRuns).values({
+        id: newRunId,
+        routeId: run.routeId,
+        clientId: run.clientId,
+        readerId: req.toReaderId,
+        runDate: run.runDate,
+        cycleId: run.cycleId,
+        status: 'open',
+        splitFromRunId: runId,
+      });
 
-    // Re-parent only the pending stops (double-guarded on status).
-    await this.db
-      .update(runStops)
-      .set({ runId: newRunId, updatedAt: new Date() })
-      .where(and(inArray(runStops.id, req.stopIds), eq(runStops.status, 'pending')));
+      // Re-parent only the pending stops, and only ones still on *this* run.
+      const moved = await tx
+        .update(runStops)
+        .set({ runId: newRunId, updatedAt: new Date() })
+        .where(
+          and(
+            inArray(runStops.id, req.stopIds),
+            eq(runStops.runId, runId),
+            eq(runStops.status, 'pending'),
+          ),
+        )
+        .returning({ id: runStops.id });
+
+      if (moved.length !== req.stopIds.length) {
+        throw new ConflictException(
+          'stops changed while the split was being prepared — reload the run and retry',
+        );
+      }
+    });
 
     const meta = { toReaderId: req.toReaderId, movedStops: req.stopIds.length, newRunId };
     await this.audit.write({ actorId, action: 'run.split_from', entity: 'route_run', entityId: runId, meta });
@@ -261,7 +305,12 @@ export class RunsService {
 
   /** Skip a stop with a seeded reason (BUILD_SPEC §7.2). Idempotent: only a
    *  pending stop is skipped; already-read/skipped stops are left as-is. */
-  async skipStop(runId: string, stopId: string, code: SkipReasonCode): Promise<RunDetail> {
+  async skipStop(
+    runId: string,
+    stopId: string,
+    code: SkipReasonCode,
+    actorId: string,
+  ): Promise<RunDetail> {
     const [reason] = await this.db
       .select({ id: skipReasons.id })
       .from(skipReasons)
@@ -269,10 +318,25 @@ export class RunsService {
       .limit(1);
     if (!reason) throw new NotFoundException('unknown skip reason');
 
-    await this.db
+    const skipped = await this.db
       .update(runStops)
       .set({ status: 'skipped', skipReasonId: reason.id, updatedAt: new Date() })
-      .where(and(eq(runStops.id, stopId), eq(runStops.runId, runId), eq(runStops.status, 'pending')));
+      .where(and(eq(runStops.id, stopId), eq(runStops.runId, runId), eq(runStops.status, 'pending')))
+      .returning({ id: runStops.id, meterId: runStops.meterId });
+
+    // A skip removes a meter from the billing cycle, so it needs the same
+    // accountability as the other run mutations. Audited only when the update
+    // actually changed something: the guard above makes this idempotent, and a
+    // replayed offline skip must not stack duplicate audit rows.
+    if (skipped[0]) {
+      await this.audit.write({
+        actorId,
+        action: 'run_stop.skipped',
+        entity: 'run_stop',
+        entityId: stopId,
+        meta: { runId, meterId: skipped[0].meterId, skipReasonCode: code },
+      });
+    }
     return this.detail(runId);
   }
 

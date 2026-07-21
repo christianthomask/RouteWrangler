@@ -1,0 +1,5 @@
+ALTER TABLE "exceptions" ADD CONSTRAINT "exceptions_certified_read_event_id_read_events_id_fk" FOREIGN KEY ("certified_read_event_id") REFERENCES "public"."read_events"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "export_runs" ADD CONSTRAINT "export_runs_superseded_by_run_id_export_runs_id_fk" FOREIGN KEY ("superseded_by_run_id") REFERENCES "public"."export_runs"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "read_events" ADD CONSTRAINT "read_events_exception_id_exceptions_id_fk" FOREIGN KEY ("exception_id") REFERENCES "public"."exceptions"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "route_runs" ADD CONSTRAINT "route_runs_split_from_run_id_route_runs_id_fk" FOREIGN KEY ("split_from_run_id") REFERENCES "public"."route_runs"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "run_stops" ADD CONSTRAINT "run_stops_completed_read_event_id_read_events_id_fk" FOREIGN KEY ("completed_read_event_id") REFERENCES "public"."read_events"("id") ON DELETE set null ON UPDATE no action;

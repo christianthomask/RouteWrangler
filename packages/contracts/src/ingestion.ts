@@ -46,7 +46,14 @@ export const IngestRequestSchema = z.object({
 export type IngestRequest = z.infer<typeof IngestRequestSchema>;
 
 /** Per-event outcome — the caller reconciles its offline queue against this. */
-export const IngestEventStatusSchema = z.enum(['accepted', 'duplicate', 'rejected']);
+/**
+ * `rejected` is terminal — the event is invalid and will never be accepted, so
+ * the client should drop it. `failed` is retryable: the event may well be fine
+ * and the server hit an unexpected error handling it. The distinction matters
+ * because the field queue reconciles against these: treating an infrastructure
+ * failure as `rejected` would silently discard a capture that was never stored.
+ */
+export const IngestEventStatusSchema = z.enum(['accepted', 'duplicate', 'rejected', 'failed']);
 export type IngestEventStatus = z.infer<typeof IngestEventStatusSchema>;
 
 export const IngestEventResultSchema = z.object({
@@ -68,5 +75,7 @@ export const IngestResponseSchema = z.object({
   accepted: z.number().int().nonnegative(),
   duplicates: z.number().int().nonnegative(),
   rejected: z.number().int().nonnegative(),
+  /** Server-side errors — retryable, and counted apart from `rejected`. */
+  failed: z.number().int().nonnegative(),
 });
 export type IngestResponse = z.infer<typeof IngestResponseSchema>;

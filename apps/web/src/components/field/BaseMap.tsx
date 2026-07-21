@@ -10,8 +10,8 @@ import type { MapStop } from './RouteMap';
  * Real-basemap map (ADR-022): MapLibre GL rendering our self-hosted PMTiles
  * vector tiles from R2, with the route + stops drawn as a GeoJSON overlay on
  * top. Client-only (needs WebGL + DOM). Any failure — no WebGL, style/tiles
- * unreachable — calls onFallback so the wrapper swaps in the SVG plot, which is
- * always available offline.
+ * unreachable, or the WebGL context being lost after load — calls onFallback so
+ * the wrapper swaps in the SVG plot, which is always available offline.
  */
 
 const TONE_COLOR: Record<MapStop['tone'], string> = {
@@ -87,6 +87,7 @@ export function BaseMap({
   useEffect(() => {
     let disposed = false;
     let map: unknown;
+    let detachContextLoss: (() => void) | null = null;
 
     (async () => {
       try {
@@ -117,6 +118,26 @@ export function BaseMap({
           readyRef.current = true;
           draw(m, maplibre, stops, currentId, nextId, focus, onSelect);
         });
+
+        // WebGL context loss *after* load. The `error` handler above only fires
+        // the fallback pre-`load`, so without this a context loss would leave a
+        // dead, blank canvas on screen. This is the realistic field case: on a
+        // low-memory phone the OS/GPU reclaims the context when the tab is
+        // backgrounded or another app demands VRAM. We don't attempt a restore —
+        // the SVG plot is always available and always cheap — so treat loss as
+        // terminal for the basemap and hand back to the fallback.
+        const onContextLost = () => {
+          if (disposed) return;
+          readyRef.current = false;
+          onFallbackRef.current?.();
+        };
+        m.on('webglcontextlost', onContextLost);
+        const canvas: HTMLCanvasElement | undefined = m.getCanvas?.();
+        canvas?.addEventListener('webglcontextlost', onContextLost);
+        detachContextLoss = () => {
+          m.off('webglcontextlost', onContextLost);
+          canvas?.removeEventListener('webglcontextlost', onContextLost);
+        };
       } catch {
         onFallbackRef.current?.(); // no WebGL / import failure
       }
@@ -125,6 +146,8 @@ export function BaseMap({
     return () => {
       disposed = true;
       readyRef.current = false;
+      detachContextLoss?.();
+      detachContextLoss = null;
       if (map && typeof (map as { remove?: () => void }).remove === 'function') {
         (map as { remove: () => void }).remove();
       }

@@ -38,8 +38,19 @@ export interface QueuedAction {
 }
 
 /** Accept both a fresh insert and an idempotent replay as "landed exactly once". */
+/**
+ * Only an explicit `accepted` or `duplicate` means the server holds the read
+ * (ADR-008 — a replay of an accepted read comes back `duplicate`). Everything
+ * else stays retryable.
+ *
+ * Deliberately an allowlist rather than `status === 'rejected' ? … : 'synced'`:
+ * that form defaults *unknown* statuses to synced, so the server gaining a new
+ * status — as it did with `failed` — would silently mark an unstored capture as
+ * safe and let the queue drop it. Failing closed costs a redundant retry;
+ * failing open loses a reader's work.
+ */
 export function stateFromIngest(status: IngestEventStatus): ActionState {
-  return status === 'rejected' ? 'failed' : 'synced';
+  return status === 'accepted' || status === 'duplicate' ? 'synced' : 'failed';
 }
 
 /** The actions to (re)send this sync pass, in capture order. */

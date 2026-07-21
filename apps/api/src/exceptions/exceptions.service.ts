@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, gte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, notInArray, sql } from 'drizzle-orm';
 import {
   DEFAULT_VALIDATION_CONFIG,
   type ExceptionCode,
@@ -31,7 +31,7 @@ import {
 } from '../db/schema';
 import { STORAGE, type StoragePort } from '../storage/storage.port';
 import { AuditService } from '../audit/audit.service';
-import { MAX_REREADS, allowedActions, isTerminal } from './lifecycle';
+import { MAX_REREADS, TERMINAL_STATUSES, allowedActions, isTerminal } from './lifecycle';
 
 const PHOTO_URL_TTL = 900;
 
@@ -237,20 +237,48 @@ export class ExceptionsService {
     if (ex.rereadCount >= MAX_REREADS) {
       throw new ConflictException('reread cap reached — override or escalate');
     }
-    await this.db.insert(rereadTasks).values({
-      exceptionId: id,
-      readerId: (await this.flaggedReader(ex.readEventId)) ?? actorId,
-      status: 'issued',
+    const readerId = (await this.flaggedReader(ex.readEventId)) ?? actorId;
+
+    /*
+     * The checks above are a fast path for the common case; they are not the
+     * enforcement. Two supervisors ordering a reread at the same time would
+     * both read rereadCount = 1, both pass the cap check, and both write 2 —
+     * one increment lost, and the cap silently exceeded by issuing two tasks.
+     *
+     * So the real guard lives in the UPDATE's WHERE (still non-terminal, still
+     * under the cap) and the count is incremented from the column rather than
+     * from the value we read. The task insert shares the transaction, so a
+     * losing racer rolls its task back instead of leaving an orphan pointing at
+     * an exception that never moved.
+     */
+    const rereadCount = sql`${exceptions.rereadCount} + 1`;
+    await this.db.transaction(async (tx) => {
+      const updated = await tx
+        .update(exceptions)
+        .set({
+          status: 'reread_ordered',
+          rereadCount,
+          actionedBy: actorId,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(exceptions.id, id),
+            notInArray(exceptions.status, TERMINAL_STATUSES),
+            lt(exceptions.rereadCount, MAX_REREADS),
+          ),
+        )
+        .returning({ id: exceptions.id });
+
+      if (updated.length === 0) {
+        throw new ConflictException(
+          'exception changed while the reread was being ordered — reload and retry',
+        );
+      }
+
+      await tx.insert(rereadTasks).values({ exceptionId: id, readerId, status: 'issued' });
     });
-    await this.db
-      .update(exceptions)
-      .set({
-        status: 'reread_ordered',
-        rereadCount: ex.rereadCount + 1,
-        actionedBy: actorId,
-        updatedAt: new Date(),
-      })
-      .where(eq(exceptions.id, id));
+
     await this.audit.write({
       actorId,
       action: 'exception.reread_ordered',
@@ -272,10 +300,17 @@ export class ExceptionsService {
   async escalate(id: string, note: string, actorId: string): Promise<ExceptionDetail> {
     const ex = await this.load(id);
     this.ensureNotTerminal(ex.status);
-    await this.db
+    // Guard repeated in the WHERE: between the check above and this write, a
+    // concurrent resolve/override could have made the exception terminal, and
+    // an unguarded UPDATE would silently reopen a closed decision.
+    const updated = await this.db
       .update(exceptions)
       .set({ status: 'escalated', resolutionNote: note, actionedBy: actorId, updatedAt: new Date() })
-      .where(eq(exceptions.id, id));
+      .where(and(eq(exceptions.id, id), notInArray(exceptions.status, TERMINAL_STATUSES)))
+      .returning({ id: exceptions.id });
+    if (updated.length === 0) {
+      throw new ConflictException('exception was closed by another action — reload and retry');
+    }
     await this.audit.write({
       actorId,
       action: 'exception.escalated',
@@ -296,8 +331,12 @@ export class ExceptionsService {
     const ex = await this.load(id);
     this.ensureNotTerminal(ex.status);
     const certified = req.certifiedReadEventId ?? ex.readEventId;
-    await this.assertReadBelongs(certified, ex.meterId);
-    await this.db
+    await this.assertReadBelongs(certified, ex);
+    // Same guard as escalate: this decides what gets billed, so two supervisors
+    // closing the same exception concurrently must not both win — the second
+    // gets a conflict rather than silently overwriting the first's certified
+    // read and resolution note.
+    const updated = await this.db
       .update(exceptions)
       .set({
         status,
@@ -306,7 +345,11 @@ export class ExceptionsService {
         actionedBy: actorId,
         updatedAt: new Date(),
       })
-      .where(eq(exceptions.id, id));
+      .where(and(eq(exceptions.id, id), notInArray(exceptions.status, TERMINAL_STATUSES)))
+      .returning({ id: exceptions.id });
+    if (updated.length === 0) {
+      throw new ConflictException('exception was closed by another action — reload and retry');
+    }
     await this.audit.write({
       actorId,
       action,
@@ -326,14 +369,56 @@ export class ExceptionsService {
     return r?.readerId ?? null;
   }
 
-  private async assertReadBelongs(readEventId: string, meterId: string): Promise<void> {
+  /**
+   * A certified read is swapped into the billing export in place of the flagged
+   * one (ADR-002), so it has to be a read that legitimately answers *this*
+   * exception. Matching on meter alone is not enough: every prior month's read
+   * is on the same meter, so a mis-selected id could pull last cycle's value
+   * into this cycle's invoice.
+   *
+   * Accepted: the flagged read itself, a reread issued against this exception,
+   * or another read from the same billing cycle. Rejected: a different meter,
+   * or a read from another cycle. The cycle check only fires when both cycles
+   * are known — a read with no run stop (e.g. an ad-hoc capture) isn't rejected
+   * for lacking one.
+   */
+  private async assertReadBelongs(
+    readEventId: string,
+    ex: { id: string; meterId: string; readEventId: string },
+  ): Promise<void> {
     const [r] = await this.db
-      .select({ meterId: readEvents.meterId })
+      .select({
+        meterId: readEvents.meterId,
+        exceptionId: readEvents.exceptionId,
+        cycleId: routeRuns.cycleId,
+      })
       .from(readEvents)
+      .leftJoin(runStops, eq(readEvents.runStopId, runStops.id))
+      .leftJoin(routeRuns, eq(runStops.runId, routeRuns.id))
       .where(eq(readEvents.id, readEventId))
       .limit(1);
-    if (!r || r.meterId !== meterId) {
+
+    if (!r || r.meterId !== ex.meterId) {
       throw new ConflictException('certified read does not belong to this meter');
     }
+    // The flagged read, or a reread ordered for this exception, always qualify.
+    if (readEventId === ex.readEventId || r.exceptionId === ex.id) return;
+
+    const flaggedCycle = await this.cycleOfRead(ex.readEventId);
+    if (flaggedCycle && r.cycleId && r.cycleId !== flaggedCycle) {
+      throw new ConflictException('certified read is from a different billing cycle');
+    }
+  }
+
+  /** The billing cycle a read was captured in, if it is tied to a run stop. */
+  private async cycleOfRead(readEventId: string): Promise<string | null> {
+    const [r] = await this.db
+      .select({ cycleId: routeRuns.cycleId })
+      .from(readEvents)
+      .innerJoin(runStops, eq(readEvents.runStopId, runStops.id))
+      .innerJoin(routeRuns, eq(runStops.runId, routeRuns.id))
+      .where(eq(readEvents.id, readEventId))
+      .limit(1);
+    return r?.cycleId ?? null;
   }
 }

@@ -11,6 +11,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
   unique,
 } from 'drizzle-orm/pg-core';
 
@@ -134,7 +135,10 @@ export const routeRuns = pgTable(
     runDate: text('run_date').notNull(), // ISO date (yyyy-mm-dd)
     cycleId: text('cycle_id').notNull(),
     status: runStatusEnum('status').notNull().default('open'),
-    splitFromRunId: uuid('split_from_run_id'),
+    // Self-reference: the run this one was carved out of (ADR-005).
+    splitFromRunId: uuid('split_from_run_id').references((): AnyPgColumn => routeRuns.id, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -157,7 +161,10 @@ export const runStops = pgTable(
     sequence: integer('sequence').notNull(),
     status: runStopStatusEnum('status').notNull().default('pending'),
     skipReasonId: uuid('skip_reason_id').references(() => skipReasons.id),
-    completedReadEventId: uuid('completed_read_event_id'),
+    completedReadEventId: uuid('completed_read_event_id').references(
+      (): AnyPgColumn => readEvents.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -196,7 +203,9 @@ export const readEvents = pgTable(
     /** consumption computed at ingest (value − prior), for history/baseline. */
     consumption: doublePrecision('consumption'),
     billable: boolean('billable').notNull().default(false),
-    exceptionId: uuid('exception_id'),
+    exceptionId: uuid('exception_id').references((): AnyPgColumn => exceptions.id, {
+      onDelete: 'set null',
+    }),
     // NOTE: no updated_at — read events are never updated.
   },
   (t) => [
@@ -259,7 +268,10 @@ export const exceptions = pgTable(
     // The read the supervisor certified as billable at resolution. Recorded here
     // (not by mutating the immutable read — ADR-002) so export can compute final
     // billability from the certification decision (W4).
-    certifiedReadEventId: uuid('certified_read_event_id'),
+    certifiedReadEventId: uuid('certified_read_event_id').references(
+      (): AnyPgColumn => readEvents.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -305,7 +317,11 @@ export const exportRuns = pgTable(
     // future object-storage offload of large bodies — ADR-023).
     body: text('body'),
     fileKey: text('file_key'),
-    supersededByRunId: uuid('superseded_by_run_id'),
+    // Self-reference: the export run that replaced this one (ADR-023).
+    supersededByRunId: uuid('superseded_by_run_id').references(
+      (): AnyPgColumn => exportRuns.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

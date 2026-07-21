@@ -14,6 +14,31 @@ export function signInDev(sub: string): void {
   window.localStorage.setItem(DEV_SUB_KEY, sub);
 }
 
+/**
+ * SECURITY TRADE-OFF — the IdP JWT lives in localStorage, not an httpOnly cookie.
+ *
+ * Exposure: anything that can execute script in this origin can read the token
+ * and replay it against the API until it expires. That means a successful XSS,
+ * or a compromised/malicious third-party script loaded into the page. An
+ * httpOnly cookie would keep the raw token out of reach of script — the injected
+ * code could still make authenticated requests *as the page*, but it could not
+ * exfiltrate a bearer token for offline reuse elsewhere, so the blast radius is
+ * bounded by the session rather than by the token lifetime.
+ *
+ * Why we accept it here: the API is a separate origin, so cookie auth would need
+ * cross-site cookies (SameSite=None; Secure) plus CSRF defence on every mutating
+ * route, and Clerk would have to mint/refresh the session cookie server-side —
+ * an API + IdP change, not a web-app change. The app itself is currently free of
+ * injection sinks (no dangerouslySetInnerHTML / innerHTML / eval / srcDoc; all
+ * hrefs are literal or numeric), which is what actually keeps this safe today.
+ *
+ * Real mitigation, in order of value:
+ *   1. Keep the app XSS-clean — that invariant is doing the load-bearing work.
+ *      Any future dangerouslySetInnerHTML re-opens this hole.
+ *   2. Short token TTL + refresh via the Clerk bridge, so a stolen token dies fast.
+ *   3. A strict CSP (no unsafe-inline/unsafe-eval) to blunt injection generally.
+ *   4. Only then: move to httpOnly cookies + CSRF tokens (API + Clerk work).
+ */
 export function setToken(token: string): void {
   window.localStorage.setItem(TOKEN_KEY, token);
 }

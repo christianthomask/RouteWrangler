@@ -8,6 +8,7 @@ const base: StopRow = {
   readValue: 1000,
   consumption: 42,
   readAt: '2026-07-18T10:00:00.000Z',
+  skipReasonCode: null,
   exceptions: [],
 };
 
@@ -20,13 +21,13 @@ const exc = (code: string, status: string, blocksBilling: boolean): StopExceptio
 describe('export classify (BUILD_SPEC §7.4)', () => {
   it('a clean read is billable', () => {
     const c = classify([base]);
-    expect(c.counts).toEqual({ billable: 1, held: 0, missing: 0 });
+    expect(c.counts).toEqual({ billable: 1, held: 0, missing: 0, skipped: 0 });
     expect(c.billable[0]!.meterSerial).toBe('SLO-1-001');
   });
 
   it('an unresolved blocking exception holds the read out', () => {
     const c = classify([{ ...base, exceptions: [exc('high_read', 'open', true)] }]);
-    expect(c.counts).toEqual({ billable: 0, held: 1, missing: 0 });
+    expect(c.counts).toEqual({ billable: 0, held: 1, missing: 0, skipped: 0 });
     expect(c.holds[0]!.reason).toBe('blocking_exception');
     expect(c.holds[0]!.exceptionCode).toBe('high_read');
   });
@@ -45,7 +46,7 @@ describe('export classify (BUILD_SPEC §7.4)', () => {
 
   it('a stop with no read is missing, not held', () => {
     const c = classify([{ ...base, readValue: null, readAt: null }]);
-    expect(c.counts).toEqual({ billable: 0, held: 0, missing: 1 });
+    expect(c.counts).toEqual({ billable: 0, held: 0, missing: 1, skipped: 0 });
     expect(c.holds[0]!.reason).toBe('not_read');
   });
 
@@ -55,7 +56,48 @@ describe('export classify (BUILD_SPEC §7.4)', () => {
       { ...base, meterSerial: 'SLO-1-002', exceptions: [exc('leak_spike', 'open', true)] },
       { ...base, meterSerial: 'SLO-1-003', readValue: null, readAt: null },
     ]);
-    expect(c.counts).toEqual({ billable: 1, held: 1, missing: 1 });
+    expect(c.counts).toEqual({ billable: 1, held: 1, missing: 1, skipped: 0 });
+  });
+
+  // M4 regression: a deliberate skip and an unworked stop are both unbillable,
+  // but the client has to be able to tell them apart to know which meters still
+  // need a visit.
+  describe('a deliberate skip is distinct from an unworked stop (M4)', () => {
+    const unread = { ...base, readValue: null, readAt: null };
+
+    it('a skipped stop reports reason "skipped" and carries the skip code', () => {
+      const c = classify([{ ...unread, skipReasonCode: 'locked_gate' }]);
+      expect(c.counts).toEqual({ billable: 0, held: 0, missing: 0, skipped: 1 });
+      expect(c.holds[0]!.reason).toBe('skipped');
+      expect(c.holds[0]!.skipReasonCode).toBe('locked_gate');
+    });
+
+    it('an unworked stop stays "not_read" with no skip code', () => {
+      const c = classify([unread]);
+      expect(c.counts).toEqual({ billable: 0, held: 0, missing: 1, skipped: 0 });
+      expect(c.holds[0]!.reason).toBe('not_read');
+      expect(c.holds[0]!.skipReasonCode).toBeNull();
+    });
+
+    it('counts partition holds across all three reasons', () => {
+      const c = classify([
+        base,
+        { ...base, meterSerial: 'A', exceptions: [exc('leak_spike', 'open', true)] },
+        { ...unread, meterSerial: 'B' },
+        { ...unread, meterSerial: 'C', skipReasonCode: 'dog_on_property' },
+      ]);
+      expect(c.counts).toEqual({ billable: 1, held: 1, missing: 1, skipped: 1 });
+      expect(c.holds).toHaveLength(3);
+    });
+
+    it('a skip code never leaks onto a hold of another reason', () => {
+      const c = classify([
+        { ...base, skipReasonCode: 'locked_gate', exceptions: [exc('high_read', 'open', true)] },
+      ]);
+      // The read completed, so the stale skip code is irrelevant here.
+      expect(c.holds[0]!.reason).toBe('blocking_exception');
+      expect(c.holds[0]!.skipReasonCode).toBeNull();
+    });
   });
 
   // C1 regression: a read with ≥2 exceptions must count ONCE, and any active
@@ -68,7 +110,7 @@ describe('export classify (BUILD_SPEC §7.4)', () => {
           exceptions: [exc('high_read', 'open', true), exc('location_absent', 'open', false)],
         },
       ]);
-      expect(c.counts).toEqual({ billable: 0, held: 1, missing: 0 });
+      expect(c.counts).toEqual({ billable: 0, held: 1, missing: 0, skipped: 0 });
       expect(c.billable).toHaveLength(0);
       expect(c.holds).toHaveLength(1);
       expect(c.holds[0]!.exceptionCode).toBe('high_read');
@@ -84,7 +126,7 @@ describe('export classify (BUILD_SPEC §7.4)', () => {
           ],
         },
       ]);
-      expect(c.counts).toEqual({ billable: 1, held: 0, missing: 0 });
+      expect(c.counts).toEqual({ billable: 1, held: 0, missing: 0, skipped: 0 });
       expect(c.billable).toHaveLength(1);
     });
 
@@ -95,7 +137,7 @@ describe('export classify (BUILD_SPEC §7.4)', () => {
           exceptions: [exc('high_read', 'resolved', true), exc('leak_spike', 'open', true)],
         },
       ]);
-      expect(c.counts).toEqual({ billable: 0, held: 1, missing: 0 });
+      expect(c.counts).toEqual({ billable: 0, held: 1, missing: 0, skipped: 0 });
       expect(c.holds[0]!.exceptionCode).toBe('leak_spike');
     });
 
@@ -109,7 +151,7 @@ describe('export classify (BUILD_SPEC §7.4)', () => {
           ],
         },
       ]);
-      expect(c.counts).toEqual({ billable: 1, held: 0, missing: 0 });
+      expect(c.counts).toEqual({ billable: 1, held: 0, missing: 0, skipped: 0 });
       expect(c.billable).toHaveLength(1);
     });
   });

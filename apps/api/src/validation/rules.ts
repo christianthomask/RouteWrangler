@@ -86,6 +86,9 @@ const zeroStreak: RuleModule = {
   evaluate(d: Derived) {
     if (!d.isZero) return null;
     const n = d.input.config.zeroStreakCycles;
+    // The tail must be n *consecutive* cycles of real zero. A null is a gap in
+    // the history, not a zero — `c === 0` is false for null, so a gap inside
+    // the window correctly declines to fire.
     const tail = d.recentConsumptions.slice(-n);
     return tail.length >= n && tail.every((c) => c === 0)
       ? { code: 'zero_consumption_streak' }

@@ -150,10 +150,19 @@ export async function downloadExport(id: string, filename: string): Promise<void
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.rel = 'noopener';
+  a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  // `a.click()` only *schedules* the download: the browser reads the blob URL
+  // asynchronously, after the current task. Revoking it synchronously here can
+  // beat that read and yield an empty or failed download (observed in Safari and
+  // older Firefox). Defer the revoke a tick past the click so the download has
+  // been initiated; the URL is still released, so nothing leaks.
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 0);
 }
 
 export type { Dashboard, ExceptionDetail, ExceptionListResponse, MeResponse, MeterHistoryResponse, TaxonomyResponse };

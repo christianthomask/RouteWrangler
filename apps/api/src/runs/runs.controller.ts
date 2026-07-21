@@ -82,6 +82,6 @@ export class RunsController {
     const parsed = SkipStopRequestSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     await this.runs.assertRunAccess(id, user);
-    return this.runs.skipStop(id, stopId, parsed.data.skipReasonCode);
+    return this.runs.skipStop(id, stopId, parsed.data.skipReasonCode, user.id);
   }
 }

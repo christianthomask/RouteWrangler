@@ -44,13 +44,31 @@ export class IngestionService {
   async ingest(req: IngestRequest, actor: IngestActor): Promise<IngestResponse> {
     const results: IngestEventResult[] = [];
     for (const ev of req.events) {
-      results.push(await this.ingestOne(ev, actor));
+      // One bad event must not sink the batch. Earlier events have already
+      // committed, so throwing here would hand the client a 500 despite partial
+      // success — and an offline-first queue would then re-send reads that
+      // already landed. Idempotency makes that harmless but not free, and it
+      // hides the real per-event outcome of the rest of the batch. An unexpected
+      // throw is therefore recorded as this event's failure and the loop
+      // continues; the client retries exactly the events that actually failed.
+      try {
+        results.push(await this.ingestOne(ev, actor));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`ingest of event ${ev.id} failed: ${message}`, (err as Error)?.stack);
+        // `failed`, not `rejected`: the event itself may be perfectly valid and
+        // the failure ours. `rejected` is terminal and would have the field
+        // queue discard a capture that never landed. One bad event must not
+        // fail the batch either — the rest of the results are still truthful.
+        results.push({ id: ev.id, status: 'failed', message: `internal error: ${message}` });
+      }
     }
     return {
       results,
       accepted: results.filter((r) => r.status === 'accepted').length,
       duplicates: results.filter((r) => r.status === 'duplicate').length,
       rejected: results.filter((r) => r.status === 'rejected').length,
+      failed: results.filter((r) => r.status === 'failed').length,
     };
   }
 
