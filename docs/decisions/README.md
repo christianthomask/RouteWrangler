@@ -27,3 +27,7 @@ sprint that makes a non-obvious choice adds one.
 | [017](./ADR-017-product-name.md) | Product name: Verameter (provisional, design) |
 | [018](./ADR-018-mobile-first-console.md) | Mobile-first for all surfaces incl. supervisor/admin (design; overrides brief) |
 | [019](./ADR-019-cloudflare-deploy.md) | Cloudflare deployment via GitHub Actions (web=Workers/OpenNext, api=Containers) |
+| [020](./ADR-020-field-pwa-store-and-forward.md) | Field PWA: offline store-and-forward with exactly-once capture |
+| [021](./ADR-021-offline-route-map.md) | Offline route map from stop coordinates (no tiles) |
+| [022](./ADR-022-self-hosted-basemap.md) | Real basemap via self-hosted PMTiles + MapLibre, offline per route |
+| [023](./ADR-023-billing-export.md) | Billing export: snapshot per client + cycle |

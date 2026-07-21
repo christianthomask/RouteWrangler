@@ -118,5 +118,9 @@ Blob · Container Apps), plus the local MinIO stack. IaC is deferred and labeled
 
 ## Where things go next
 
-See `SPRINT_PLAN.md`. Sprint 1 = the headless core (full schema, ingestion,
-validation rule registry, the simulator's seed/playback/anomaly modes).
+Sprint 1 = the headless core (full schema, ingestion, validation rule registry,
+the simulator's seed/playback/anomaly modes) — done, along with the field PWA,
+supervisor console and billing export. Open items live in
+[`docs/questions.md`](./docs/questions.md); the reasoning behind what's built is
+in [`docs/decisions/`](./docs/decisions/) and the operational steps in
+[`docs/runbook.md`](./docs/runbook.md).

@@ -1,0 +1,43 @@
+name: Seed (Neon)
+
+# Re-applies the deterministic seed world (BUILD_SPEC §5) to the deployed
+# database. The seed is idempotent — deterministic ids plus upserts, no deletes
+# or truncates — so this converges an already-seeded database onto the current
+# world definition (e.g. after the meter layout changes) rather than duplicating
+# anything. Runs here rather than from a Claude Code session because that's
+# where DATABASE_URL lives.
+#
+# Manual only, and gated on typing the confirmation: this writes to production.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "seed" to confirm writing to the deployed database'
+        required: true
+        default: ''
+
+concurrency:
+  group: seed-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        if: inputs.confirm != 'seed'
+        run: |
+          echo "::error::Refusing to run: type 'seed' in the confirm input."
+          exit 1
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # No AWS credentials here, so the seed runs in LOCAL-ONLY mode: it writes
+      # Postgres rows with `local-only:` subs and does not touch any identity
+      # provider. Real staff are provisioned by the Clerk webhook, not by this.
+      - name: Seed the deployed database
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm seed
