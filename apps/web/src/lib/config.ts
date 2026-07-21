@@ -22,9 +22,18 @@ export const clerkConfigured = Boolean(config.clerkPublishableKey);
 /** Real basemap is available only once a style URL is configured (else SVG fallback). */
 export const basemapConfigured = Boolean(config.mapStyleUrl);
 
-/** Dev-bypass active only when no real IdP is configured and not explicitly off. */
+/**
+ * Dev-bypass is dev-only and fails closed (H9). It is active only outside a
+ * production build, only when no real IdP is configured, and only when not
+ * explicitly disabled. Defaulting to on in non-prod keeps `pnpm dev` working
+ * without extra env; the `NODE_ENV === 'production'` guard means a prod build
+ * NEVER renders the "Continue as …" buttons or sends x-dev-user-sub — a missing
+ * Clerk key must fail closed, not fall back to an unauthenticated admin bypass.
+ */
 export const authDevBypass =
-  !clerkConfigured && (process.env.NEXT_PUBLIC_AUTH_DEV_BYPASS ?? 'true') !== 'false';
+  process.env.NODE_ENV !== 'production' &&
+  !clerkConfigured &&
+  (process.env.NEXT_PUBLIC_AUTH_DEV_BYPASS ?? 'true') !== 'false';
 
 /** Seeded users for local "Continue as" (matches the API seed subs). */
 export interface DevUser {

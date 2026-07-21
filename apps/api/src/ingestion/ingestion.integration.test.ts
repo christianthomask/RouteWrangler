@@ -27,7 +27,9 @@ suite('ingestion idempotency (integration)', () => {
     const clientId = randomUUID();
     const meterId = randomUUID();
     const readerId = randomUUID();
-    await db.insert(clients).values({ id: clientId, name: `T-${clientId.slice(0, 8)}`, state: 'CA' });
+    await db
+      .insert(clients)
+      .values({ id: clientId, name: `T-${clientId.slice(0, 8)}`, state: 'CA' });
     await db.insert(meters).values({
       id: meterId,
       clientId,
@@ -53,14 +55,15 @@ suite('ingestion idempotency (integration)', () => {
       lng: -120.1,
     };
     const batch = { events: [event] };
+    const actor = { id: readerId, role: 'reader' as const };
 
-    const first = await svc.ingest(batch);
+    const first = await svc.ingest(batch, actor);
     expect(first.accepted).toBe(1);
     expect(first.results[0]!.status).toBe('accepted');
 
     // Replay the same batch three times.
     for (let i = 0; i < 3; i++) {
-      const replay = await svc.ingest(batch);
+      const replay = await svc.ingest(batch, actor);
       expect(replay.duplicates).toBe(1);
       expect(replay.accepted).toBe(0);
       expect(replay.results[0]!.status).toBe('duplicate');

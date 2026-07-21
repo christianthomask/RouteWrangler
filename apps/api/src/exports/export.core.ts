@@ -7,7 +7,14 @@ import type { ExportCounts, ExportFormat, ExportHold, HoldReason } from '@routew
  * file.
  */
 
-/** One cycle stop as seen by the export, flattened from the join. */
+/** One exception on a read, as the export sees it. */
+export interface StopException {
+  code: string;
+  status: string;
+  blocksBilling: boolean;
+}
+
+/** One cycle stop as seen by the export, one row per stop (never per exception). */
 export interface StopRow {
   meterId: string;
   meterSerial: string;
@@ -16,10 +23,13 @@ export interface StopRow {
   readValue: number | null;
   consumption: number | null;
   readAt: string | null; // ISO
-  /** The exception on the effective read, if any. */
-  exceptionCode: string | null;
-  exceptionStatus: string | null;
-  exceptionBlocksBilling: boolean;
+  /**
+   * Every exception on the effective read (a single read routinely has ≥2 —
+   * one consumption finding plus independent findings). Billability is decided
+   * over the whole set here, never by fanning the stop into one row per
+   * exception (C1) — that double-counted and mis-billed held meters.
+   */
+  exceptions: StopException[];
 }
 
 export interface BillableLine {
@@ -48,12 +58,12 @@ export function classify(rows: StopRow[]): Classification {
       holds.push(hold(r, 'not_read', null));
       continue;
     }
-    const blocked =
-      r.exceptionCode != null &&
-      r.exceptionBlocksBilling &&
-      !(r.exceptionStatus != null && CLEARED.has(r.exceptionStatus));
-    if (blocked) {
-      holds.push(hold(r, 'blocking_exception', r.exceptionCode));
+    // A read is held iff ANY of its exceptions still blocks billing (not yet
+    // resolved/overridden). Fold across all of them — one blocking exception is
+    // enough, and non-blocking siblings never make a held read billable.
+    const blocking = r.exceptions.find((e) => e.blocksBilling && !CLEARED.has(e.status));
+    if (blocking) {
+      holds.push(hold(r, 'blocking_exception', blocking.code));
       continue;
     }
     billable.push({
@@ -107,6 +117,9 @@ export function render(format: ExportFormat, lines: BillableLine[]): string {
 }
 
 export function exportFilename(clientName: string, cycleId: string, format: ExportFormat): string {
-  const slug = clientName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const slug = clientName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
   return `${slug}-${cycleId}.${format}`;
 }

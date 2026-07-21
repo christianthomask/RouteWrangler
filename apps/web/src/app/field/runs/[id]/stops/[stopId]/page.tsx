@@ -15,7 +15,11 @@ import { RouteMapView } from '@/components/field/RouteMapView';
 import type { MapStop } from '@/components/field/RouteMap';
 import { Loading, EmptyState } from '@/components/ui';
 
-type Gps = { state: 'acquiring' | 'ok' | 'denied' | 'unavailable'; lat: number | null; lng: number | null };
+type Gps = {
+  state: 'acquiring' | 'ok' | 'denied' | 'unavailable';
+  lat: number | null;
+  lng: number | null;
+};
 
 const toTone = (s: RunStopView): MapStop['tone'] =>
   s.status === 'read' ? 'done' : s.status === 'skipped' ? 'skipped' : 'pending';
@@ -38,45 +42,69 @@ export default function CapturePage() {
   const [photo, setPhoto] = useState<string | null>(null);
   const [skipping, setSkipping] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const stop = useMemo(() => run?.stops.find((x) => x.id === stopId) ?? null, [run, stopId]);
 
   // Ordered stops → previous/next by sequence for step-through navigation.
-  const ordered = useMemo(() => [...(run?.stops ?? [])].sort((a, b) => a.sequence - b.sequence), [run]);
+  const ordered = useMemo(
+    () => [...(run?.stops ?? [])].sort((a, b) => a.sequence - b.sequence),
+    [run],
+  );
   const idx = ordered.findIndex((s) => s.id === stopId);
   const prevStop = idx > 0 ? ordered[idx - 1] : null;
   const nextStop = idx >= 0 && idx < ordered.length - 1 ? ordered[idx + 1] : null;
 
   useEffect(() => {
+    // Guard against out-of-order resolution when stepping stops fast (M10): a
+    // superseded fetch must not clobber the current stop's state.
+    let ignore = false;
     fetchRun(id)
       .then((r) => {
+        if (ignore) return;
         setRun(r);
         if (!r.stops.some((x) => x.id === stopId)) setError('stop not found');
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'failed'));
-    fetchMe().then(setMe).catch(() => {});
-    fetchTaxonomy().then(setTaxonomy).catch(() => {});
+      .catch((e) => {
+        if (!ignore) setError(e instanceof Error ? e.message : 'failed');
+      });
+    fetchMe()
+      .then((m) => !ignore && setMe(m))
+      .catch(() => {});
+    fetchTaxonomy()
+      .then((t) => !ignore && setTaxonomy(t))
+      .catch(() => {});
 
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => setGps({ state: 'ok', lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => setGps({ state: 'denied', lat: null, lng: null }),
+        (pos) =>
+          !ignore && setGps({ state: 'ok', lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => !ignore && setGps({ state: 'denied', lat: null, lng: null }),
         { timeout: 8000 },
       );
     } else {
       setGps({ state: 'unavailable', lat: null, lng: null });
     }
+    return () => {
+      ignore = true;
+    };
   }, [id, stopId]);
 
   // Meter context (access notes + past reads) — network-dependent, non-blocking.
   useEffect(() => {
     if (!stop) return;
+    // Same out-of-order guard as above — a slow read for a prior stop must not
+    // land on the stop we've since navigated to (M10).
+    let ignore = false;
     setMeter(null);
     setHistoryOffline(false);
     fetchFieldMeterReads(stop.meterId)
-      .then(setMeter)
-      .catch(() => setHistoryOffline(true));
+      .then((m) => !ignore && setMeter(m))
+      .catch(() => !ignore && setHistoryOffline(true));
+    return () => {
+      ignore = true;
+    };
   }, [stop]);
 
   if (error) return <EmptyState title="Couldn't open this stop" hint={error} />;
@@ -85,25 +113,40 @@ export default function CapturePage() {
   async function submitRead() {
     if (!stop || !me || value === '') return;
     setBusy(true);
-    await enqueueRead({
-      meterId: stop.meterId,
-      runStopId: stop.id,
-      readerId: me.id,
-      value: Number(value),
-      capturedAt: new Date().toISOString(),
-      lat: gps.lat,
-      lng: gps.lng,
-      note: note.trim() || null,
-      photoDataUrl: photo,
-    });
-    router.push(`/field/runs/${id}`);
+    setSubmitError(null);
+    try {
+      // The IndexedDB write can fail (e.g. quota exceeded). Surface it and reset
+      // the button so the reader can retry rather than losing the capture to a
+      // stuck "Saving…" state (M9). We only navigate away once it's persisted.
+      await enqueueRead({
+        meterId: stop.meterId,
+        runStopId: stop.id,
+        readerId: me.id,
+        value: Number(value),
+        capturedAt: new Date().toISOString(),
+        lat: gps.lat,
+        lng: gps.lng,
+        note: note.trim() || null,
+        photoDataUrl: photo,
+      });
+      router.push(`/field/runs/${id}`);
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : "Couldn't save on this device — try again.");
+      setBusy(false);
+    }
   }
 
   async function submitSkip(code: string) {
     if (!stop) return;
     setBusy(true);
-    await enqueueSkip({ runId: id, stopId: stop.id, skipReasonCode: code });
-    router.push(`/field/runs/${id}`);
+    setSubmitError(null);
+    try {
+      await enqueueSkip({ runId: id, stopId: stop.id, skipReasonCode: code });
+      router.push(`/field/runs/${id}`);
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : "Couldn't save on this device — try again.");
+      setBusy(false);
+    }
   }
 
   function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
@@ -121,7 +164,13 @@ export default function CapturePage() {
     unavailable: { t: 'GPS unavailable — location-absent', c: 'var(--rw-sev-low)' },
   }[gps.state];
 
-  const mapStops: MapStop[] = ordered.map((s) => ({ id: s.id, sequence: s.sequence, lat: s.lat, lng: s.lng, tone: toTone(s) }));
+  const mapStops: MapStop[] = ordered.map((s) => ({
+    id: s.id,
+    sequence: s.sequence,
+    lat: s.lat,
+    lng: s.lng,
+    tone: toTone(s),
+  }));
   const hasCoords = stop.lat != null && stop.lng != null;
   const directionsUrl = hasCoords
     ? `https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}`
@@ -130,21 +179,53 @@ export default function CapturePage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-4)' }}>
       <div>
-        <button onClick={() => router.push(`/field/runs/${id}`)} style={{ background: 'none', border: 'none', color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-sm)', cursor: 'pointer', padding: 0 }}>
+        <button
+          onClick={() => router.push(`/field/runs/${id}`)}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--rw-text-muted)',
+            fontSize: 'var(--rw-text-sm)',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
           ← Run
         </button>
         <h1 style={{ fontSize: 'var(--rw-text-xl)', margin: '6px 0 0' }}>{stop.meterSerial}</h1>
-        <p style={{ margin: '2px 0 0', color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-sm)' }}>
+        <p
+          style={{
+            margin: '2px 0 0',
+            color: 'var(--rw-text-muted)',
+            fontSize: 'var(--rw-text-sm)',
+          }}
+        >
           {stop.serviceAddress}
         </p>
-        <p style={{ margin: '2px 0 0', color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-xs)' }}>
-          Stop {stop.sequence + 1} of {ordered.length} · last read {stop.lastValue ?? '—'} · {stop.registerDials}-dial
+        <p
+          style={{
+            margin: '2px 0 0',
+            color: 'var(--rw-text-muted)',
+            fontSize: 'var(--rw-text-xs)',
+          }}
+        >
+          Stop {stop.sequence + 1} of {ordered.length} · last read {stop.lastValue ?? '—'} ·{' '}
+          {stop.registerDials}-dial
         </p>
       </div>
 
       {/* ── navigation: prev/next stepping + current→next map + directions ── */}
-      <div className="rw-card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-2)' }}>
-        <RouteMapView stops={mapStops} currentId={stop.id} nextId={nextStop?.id} focus="current" height={170} />
+      <div
+        className="rw-card"
+        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-2)' }}
+      >
+        <RouteMapView
+          stops={mapStops}
+          currentId={stop.id}
+          nextId={nextStop?.id}
+          focus="current"
+          height={170}
+        />
         <div style={{ display: 'flex', gap: 'var(--rw-space-2)' }}>
           <button
             className="rw-button rw-button--ghost"
@@ -164,7 +245,13 @@ export default function CapturePage() {
           </button>
         </div>
         {directionsUrl && (
-          <a className="rw-button rw-button--ghost" style={{ width: '100%', textDecoration: 'none', textAlign: 'center' }} href={directionsUrl} target="_blank" rel="noreferrer">
+          <a
+            className="rw-button rw-button--ghost"
+            style={{ width: '100%', textDecoration: 'none', textAlign: 'center' }}
+            href={directionsUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
             Directions to this stop ↗
           </a>
         )}
@@ -179,27 +266,54 @@ export default function CapturePage() {
       {meter?.accessNotes && (
         <div
           className="rw-card"
-          style={{ borderLeft: '3px solid var(--rw-brand)', display: 'flex', flexDirection: 'column', gap: 4 }}
+          style={{
+            borderLeft: '3px solid var(--rw-brand)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          }}
         >
-          <span className="rw-label" style={{ margin: 0 }}>Access notes</span>
+          <span className="rw-label" style={{ margin: 0 }}>
+            Access notes
+          </span>
           <p style={{ margin: 0, fontSize: 'var(--rw-text-sm)' }}>{meter.accessNotes}</p>
         </div>
       )}
 
       {skipping ? (
-        <div className="rw-card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-2)' }}>
-          <h2 style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-secondary)', margin: 0 }}>Skip reason</h2>
+        <div
+          className="rw-card"
+          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-2)' }}
+        >
+          <h2
+            style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-secondary)', margin: 0 }}
+          >
+            Skip reason
+          </h2>
           {(taxonomy?.skipReasons ?? []).map((r) => (
-            <button key={r.code} className="rw-button rw-button--ghost" style={{ width: '100%' }} disabled={busy} onClick={() => submitSkip(r.code)}>
+            <button
+              key={r.code}
+              className="rw-button rw-button--ghost"
+              style={{ width: '100%' }}
+              disabled={busy}
+              onClick={() => submitSkip(r.code)}
+            >
               {r.label}
             </button>
           ))}
-          <button className="rw-button rw-button--ghost" style={{ width: '100%', color: 'var(--rw-text-muted)' }} onClick={() => setSkipping(false)}>
+          <button
+            className="rw-button rw-button--ghost"
+            style={{ width: '100%', color: 'var(--rw-text-muted)' }}
+            onClick={() => setSkipping(false)}
+          >
             Cancel
           </button>
         </div>
       ) : (
-        <div className="rw-card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-4)' }}>
+        <div
+          className="rw-card"
+          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-4)' }}
+        >
           <label>
             <span className="rw-label">Meter reading</span>
             <input
@@ -227,14 +341,41 @@ export default function CapturePage() {
             />
           </label>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--rw-text-sm)', color: gpsLabel.c }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: gpsLabel.c, flex: 'none' }} />
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 'var(--rw-text-sm)',
+              color: gpsLabel.c,
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: gpsLabel.c,
+                flex: 'none',
+              }}
+            />
             {gpsLabel.t}
           </div>
 
           <div>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPhoto} style={{ display: 'none' }} />
-            <button className="rw-button rw-button--ghost" style={{ width: '100%' }} onClick={() => fileRef.current?.click()}>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={onPhoto}
+              style={{ display: 'none' }}
+            />
+            <button
+              className="rw-button rw-button--ghost"
+              style={{ width: '100%' }}
+              onClick={() => fileRef.current?.click()}
+            >
               {photo ? 'Photo attached ✓ — retake' : 'Attach photo (optional)'}
             </button>
           </div>
@@ -242,43 +383,118 @@ export default function CapturePage() {
           <button className="rw-button" disabled={busy || value === ''} onClick={submitRead}>
             {busy ? 'Saving…' : 'Capture read'}
           </button>
-          <button className="rw-button rw-button--ghost" style={{ width: '100%', color: 'var(--rw-warning)' }} onClick={() => setSkipping(true)}>
+          <button
+            className="rw-button rw-button--ghost"
+            style={{ width: '100%', color: 'var(--rw-warning)' }}
+            onClick={() => setSkipping(true)}
+          >
             Skip this stop
           </button>
-          <p style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)', margin: 0, textAlign: 'center' }}>
+          <p
+            style={{
+              fontSize: 'var(--rw-text-xs)',
+              color: 'var(--rw-text-muted)',
+              margin: 0,
+              textAlign: 'center',
+            }}
+          >
             Saved to your device immediately; syncs when you&apos;re online.
           </p>
         </div>
       )}
 
+      {submitError && (
+        <p
+          role="alert"
+          style={{
+            margin: 0,
+            color: 'var(--rw-danger)',
+            fontSize: 'var(--rw-text-sm)',
+            background: 'var(--rw-surface-2)',
+            border: '1px solid var(--rw-border)',
+            borderRadius: 'var(--rw-radius)',
+            padding: '0.6rem 0.75rem',
+          }}
+        >
+          {submitError}
+        </p>
+      )}
+
       {/* ── past reads + their notes ── */}
       <div className="rw-card" style={{ padding: 0 }}>
-        <div style={{ padding: 'var(--rw-space-3) var(--rw-space-4)', borderBottom: '1px solid var(--rw-border)' }}>
-          <span className="rw-label" style={{ margin: 0 }}>Past reads</span>
+        <div
+          style={{
+            padding: 'var(--rw-space-3) var(--rw-space-4)',
+            borderBottom: '1px solid var(--rw-border)',
+          }}
+        >
+          <span className="rw-label" style={{ margin: 0 }}>
+            Past reads
+          </span>
         </div>
         {!meter && !historyOffline ? (
-          <p style={{ padding: 'var(--rw-space-4)', margin: 0, color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-sm)' }}>Loading…</p>
+          <p
+            style={{
+              padding: 'var(--rw-space-4)',
+              margin: 0,
+              color: 'var(--rw-text-muted)',
+              fontSize: 'var(--rw-text-sm)',
+            }}
+          >
+            Loading…
+          </p>
         ) : historyOffline ? (
-          <p style={{ padding: 'var(--rw-space-4)', margin: 0, color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-sm)' }}>
+          <p
+            style={{
+              padding: 'var(--rw-space-4)',
+              margin: 0,
+              color: 'var(--rw-text-muted)',
+              fontSize: 'var(--rw-text-sm)',
+            }}
+          >
             History unavailable offline.
           </p>
         ) : meter && meter.reads.length === 0 ? (
-          <p style={{ padding: 'var(--rw-space-4)', margin: 0, color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-sm)' }}>
+          <p
+            style={{
+              padding: 'var(--rw-space-4)',
+              margin: 0,
+              color: 'var(--rw-text-muted)',
+              fontSize: 'var(--rw-text-sm)',
+            }}
+          >
             No reads on record yet.
           </p>
         ) : (
           <div className="rw-rows">
             {meter?.reads.map((r) => (
-              <div key={r.id} className="rw-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 2 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+              <div
+                key={r.id}
+                className="rw-row"
+                style={{ flexDirection: 'column', alignItems: 'stretch', gap: 2 }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    gap: 8,
+                  }}
+                >
                   <strong className="tabular">{r.value}</strong>
                   <span style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)' }}>
                     {new Date(r.capturedAt).toLocaleDateString()}
                     {r.consumption != null && ` · +${r.consumption}`}
                   </span>
                 </div>
-                {r.note && <div style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-secondary)' }}>“{r.note}”</div>}
-                <div style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)' }}>{r.readerName}</div>
+                {r.note && (
+                  <div style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-secondary)' }}>
+                    “{r.note}”
+                  </div>
+                )}
+                <div style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)' }}>
+                  {r.readerName}
+                </div>
               </div>
             ))}
           </div>

@@ -17,8 +17,16 @@ export const ReadEventInputSchema = z.object({
   id: z.string().uuid(),
   meterId: z.string().uuid(),
   runStopId: z.string().uuid().nullable().optional(),
-  readerId: z.string().uuid(),
-  value: z.number().nonnegative(),
+  /**
+   * Server-authoritative — the reader is the authenticated principal, not this
+   * field (H2). Kept optional for older clients/the simulator; the server
+   * ignores any supplied value and stamps the caller's id.
+   */
+  readerId: z.string().uuid().nullable().optional(),
+  // `.finite()` rejects Infinity/NaN (JSON `1e309` parses to Infinity and would
+  // otherwise pass `nonnegative()` and poison the meter's baseline — M1). The
+  // per-meter register-capacity ceiling is enforced in the service.
+  value: z.number().finite().nonnegative(),
   capturedAt: z.string().datetime(),
   sourceType: SourceTypeSchema,
   lat: z.number().nullable().optional(),

@@ -8,3 +8,8 @@
 **/*.log
 apps/web
 docs
+# Never bake local secrets into the image (M5).
+**/.env
+**/.env.*
+!**/.env.example
+**/.dev.vars

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type {
@@ -51,7 +52,13 @@ export class ExportsService {
     const [last] = await this.db
       .select({ id: exportRuns.id, ranAt: exportRuns.createdAt })
       .from(exportRuns)
-      .where(and(eq(exportRuns.clientId, clientId), eq(exportRuns.cycleId, cycleId), isNull(exportRuns.supersededByRunId)))
+      .where(
+        and(
+          eq(exportRuns.clientId, clientId),
+          eq(exportRuns.cycleId, cycleId),
+          isNull(exportRuns.supersededByRunId),
+        ),
+      )
       .orderBy(desc(exportRuns.createdAt))
       .limit(1);
     return {
@@ -74,31 +81,36 @@ export class ExportsService {
     const body = render(format, billable);
     const filename = exportFilename(client.name, cycleId, format);
 
-    // Supersede the current export for this client+cycle (if any), then insert.
-    const priorCurrent = await this.db
-      .select({ id: exportRuns.id })
-      .from(exportRuns)
-      .where(and(eq(exportRuns.clientId, clientId), eq(exportRuns.cycleId, cycleId), isNull(exportRuns.supersededByRunId)));
-
-    const [inserted] = await this.db
-      .insert(exportRuns)
-      .values({ clientId, cycleId, ranBy: actor.id, counts, format, filename, body })
-      .returning({ id: exportRuns.id });
-    const newId = inserted!.id;
-
-    if (priorCurrent.length) {
-      await this.db
+    // Pre-generate the new id so we can point any current export at it BEFORE
+    // inserting. That keeps the partial unique index (one non-superseded export
+    // per client+cycle) satisfied at every step, and — with the transaction and
+    // row lock — serializes concurrent "Generate" clicks instead of leaving two
+    // rows current (H4).
+    const newId = randomUUID();
+    const superseded = await this.db.transaction(async (tx) => {
+      const prior = await tx
         .update(exportRuns)
         .set({ supersededByRunId: newId })
-        .where(inArray(exportRuns.id, priorCurrent.map((p) => p.id)));
-    }
+        .where(
+          and(
+            eq(exportRuns.clientId, clientId),
+            eq(exportRuns.cycleId, cycleId),
+            isNull(exportRuns.supersededByRunId),
+          ),
+        )
+        .returning({ id: exportRuns.id });
+      await tx
+        .insert(exportRuns)
+        .values({ id: newId, clientId, cycleId, ranBy: actor.id, counts, format, filename, body });
+      return prior.map((p) => p.id);
+    });
 
     await this.audit.write({
       actorId: actor.id,
       action: 'export.ran',
       entity: 'export_run',
       entityId: newId,
-      meta: { clientId, cycleId, format, counts, superseded: priorCurrent.map((p) => p.id) },
+      meta: { clientId, cycleId, format, counts, superseded },
     });
 
     return this.viewById(newId);
@@ -134,7 +146,11 @@ export class ExportsService {
       .where(eq(exportRuns.id, id))
       .limit(1);
     if (!row || row.body == null) throw new NotFoundException('export not found');
-    return { filename: row.filename ?? `${id}.csv`, format: row.format as ExportFormat, body: row.body };
+    return {
+      filename: row.filename ?? `${id}.csv`,
+      format: row.format as ExportFormat,
+      body: row.body,
+    };
   }
 
   private async viewById(id: string): Promise<ExportRunView> {
@@ -160,9 +176,16 @@ export class ExportsService {
     return toView(row);
   }
 
-  /** The cycle's stops flattened for the export core, with certified-read swap. */
+  /**
+   * The cycle's stops for the export core — one row per stop (NOT per exception).
+   * A read routinely has multiple exception rows; a LEFT JOIN onto exceptions
+   * would fan a stop into N rows and double-count in classify() (C1). We fetch
+   * base stops once, then gather each read's exceptions separately and fold them
+   * in. The certified-read swap is evaluated across all of the read's exceptions,
+   * not just whichever join row happened to carry certifiedReadEventId.
+   */
   private async stopRows(clientId: string, cycleId: string): Promise<StopRow[]> {
-    const rows = await this.db
+    const base = await this.db
       .select({
         meterId: meters.id,
         meterSerial: meters.serial,
@@ -171,47 +194,89 @@ export class ExportsService {
         readValue: readEvents.value,
         consumption: readEvents.consumption,
         readAt: readEvents.capturedAt,
-        exceptionCode: exceptionTypes.code,
-        exceptionStatus: exceptions.status,
-        exceptionBlocks: exceptionTypes.blocksBilling,
-        certifiedReadId: exceptions.certifiedReadEventId,
       })
       .from(runStops)
       .innerJoin(routeRuns, eq(runStops.runId, routeRuns.id))
       .innerJoin(meters, eq(runStops.meterId, meters.id))
       .leftJoin(readEvents, eq(runStops.completedReadEventId, readEvents.id))
-      .leftJoin(exceptions, eq(exceptions.readEventId, runStops.completedReadEventId))
-      .leftJoin(exceptionTypes, eq(exceptions.typeId, exceptionTypes.id))
       .where(and(eq(routeRuns.clientId, clientId), eq(routeRuns.cycleId, cycleId)));
 
-    // For cleared exceptions certified against a *different* read, bill that read.
-    const swaps = rows
-      .filter((r) => r.certifiedReadId && r.certifiedReadId !== r.completedReadId)
-      .map((r) => r.certifiedReadId!) as string[];
-    const certified = swaps.length ? await this.readsById(swaps) : new Map();
+    const readIds = base.map((b) => b.completedReadId).filter((id): id is string => id != null);
 
-    return rows.map((r) => {
-      const cert = r.certifiedReadId && r.certifiedReadId !== r.completedReadId ? certified.get(r.certifiedReadId) : null;
+    // All exceptions for those reads, grouped by read.
+    const excRows = readIds.length
+      ? await this.db
+          .select({
+            readEventId: exceptions.readEventId,
+            code: exceptionTypes.code,
+            status: exceptions.status,
+            blocksBilling: exceptionTypes.blocksBilling,
+            certifiedReadId: exceptions.certifiedReadEventId,
+          })
+          .from(exceptions)
+          .innerJoin(exceptionTypes, eq(exceptions.typeId, exceptionTypes.id))
+          .where(inArray(exceptions.readEventId, readIds))
+      : [];
+    const byRead = new Map<string, typeof excRows>();
+    for (const e of excRows) {
+      const arr = byRead.get(e.readEventId) ?? [];
+      arr.push(e);
+      byRead.set(e.readEventId, arr);
+    }
+
+    const certifiedIdFor = (readId: string | null): string | null => {
+      if (!readId) return null;
+      const cert = (byRead.get(readId) ?? [])
+        .map((e) => e.certifiedReadId)
+        .find((id): id is string => !!id && id !== readId);
+      return cert ?? null;
+    };
+
+    const swapIds = [
+      ...new Set(
+        base.map((b) => certifiedIdFor(b.completedReadId)).filter((id): id is string => !!id),
+      ),
+    ];
+    const certified = swapIds.length ? await this.readsById(swapIds) : new Map();
+
+    return base.map((b) => {
+      const exs = b.completedReadId ? (byRead.get(b.completedReadId) ?? []) : [];
+      const certId = certifiedIdFor(b.completedReadId);
+      const cert = certId ? certified.get(certId) : null;
       return {
-        meterId: r.meterId,
-        meterSerial: r.meterSerial,
-        serviceAddress: r.serviceAddress,
-        readValue: cert ? cert.value : r.readValue,
-        consumption: cert ? cert.consumption : r.consumption,
-        readAt: cert ? cert.readAt : r.readAt ? r.readAt.toISOString() : null,
-        exceptionCode: r.exceptionCode ?? null,
-        exceptionStatus: r.exceptionStatus ?? null,
-        exceptionBlocksBilling: r.exceptionBlocks ?? false,
+        meterId: b.meterId,
+        meterSerial: b.meterSerial,
+        serviceAddress: b.serviceAddress,
+        readValue: cert ? cert.value : b.readValue,
+        consumption: cert ? cert.consumption : b.consumption,
+        readAt: cert ? cert.readAt : b.readAt ? b.readAt.toISOString() : null,
+        exceptions: exs.map((e) => ({
+          code: e.code,
+          status: e.status,
+          blocksBilling: e.blocksBilling,
+        })),
       };
     });
   }
 
-  private async readsById(ids: string[]): Promise<Map<string, { value: number; consumption: number | null; readAt: string }>> {
+  private async readsById(
+    ids: string[],
+  ): Promise<Map<string, { value: number; consumption: number | null; readAt: string }>> {
     const rows = await this.db
-      .select({ id: readEvents.id, value: readEvents.value, consumption: readEvents.consumption, capturedAt: readEvents.capturedAt })
+      .select({
+        id: readEvents.id,
+        value: readEvents.value,
+        consumption: readEvents.consumption,
+        capturedAt: readEvents.capturedAt,
+      })
       .from(readEvents)
       .where(inArray(readEvents.id, ids));
-    return new Map(rows.map((r) => [r.id, { value: r.value, consumption: r.consumption, readAt: r.capturedAt.toISOString() }]));
+    return new Map(
+      rows.map((r) => [
+        r.id,
+        { value: r.value, consumption: r.consumption, readAt: r.capturedAt.toISOString() },
+      ]),
+    );
   }
 
   private async requireClient(clientId: string) {
@@ -253,7 +318,11 @@ function toView(r: Row): ExportRunView {
     filename: r.filename ?? `${r.id}.csv`,
     ranByName: r.ranByName,
     ranAt: r.ranAt.toISOString(),
-    counts: { billable: counts.billable ?? 0, held: counts.held ?? 0, missing: counts.missing ?? 0 },
+    counts: {
+      billable: counts.billable ?? 0,
+      held: counts.held ?? 0,
+      missing: counts.missing ?? 0,
+    },
     superseded: r.supersededByRunId != null,
   };
 }

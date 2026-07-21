@@ -1,6 +1,7 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -8,6 +9,7 @@ import {
   doublePrecision,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   unique,
 } from 'drizzle-orm/pg-core';
@@ -58,22 +60,30 @@ export const clients = pgTable('clients', {
 });
 
 // ── meters ───────────────────────────────────────────────────────────────────
-export const meters = pgTable('meters', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  clientId: uuid('client_id')
-    .notNull()
-    .references(() => clients.id),
-  serial: text('serial').notNull(),
-  serviceAddress: text('service_address').notNull(),
-  lat: doublePrecision('lat'),
-  lng: doublePrecision('lng'),
-  registerDials: integer('register_dials').notNull().default(5),
-  utilityType: text('utility_type').notNull().default('water'),
-  status: meterStatusEnum('status').notNull().default('active'),
-  accessNotes: text('access_notes'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const meters = pgTable(
+  'meters',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id),
+    serial: text('serial').notNull(),
+    serviceAddress: text('service_address').notNull(),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    registerDials: integer('register_dials').notNull().default(5),
+    utilityType: text('utility_type').notNull().default('water'),
+    status: meterStatusEnum('status').notNull().default('active'),
+    accessNotes: text('access_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Serial is the billing key — it must be unique within a client (M7).
+    unique('meters_client_serial_uq').on(t.clientId, t.serial),
+    index('meters_client_idx').on(t.clientId),
+  ],
+);
 
 // ── routes + route_stops ─────────────────────────────────────────────────────
 export const routes = pgTable('routes', {
@@ -103,67 +113,93 @@ export const routeStops = pgTable(
 );
 
 // ── route_runs (dated instance) + run_stops ──────────────────────────────────
-export const routeRuns = pgTable('route_runs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  routeId: uuid('route_id')
-    .notNull()
-    .references(() => routes.id),
-  clientId: uuid('client_id')
-    .notNull()
-    .references(() => clients.id),
-  readerId: uuid('reader_id').references(() => users.id),
-  runDate: text('run_date').notNull(), // ISO date (yyyy-mm-dd)
-  cycleId: text('cycle_id').notNull(),
-  status: runStatusEnum('status').notNull().default('open'),
-  splitFromRunId: uuid('split_from_run_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const routeRuns = pgTable(
+  'route_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    routeId: uuid('route_id')
+      .notNull()
+      .references(() => routes.id),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id),
+    readerId: uuid('reader_id').references(() => users.id),
+    runDate: text('run_date').notNull(), // ISO date (yyyy-mm-dd)
+    cycleId: text('cycle_id').notNull(),
+    status: runStatusEnum('status').notNull().default('open'),
+    splitFromRunId: uuid('split_from_run_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Export + cycle queries filter by client+cycle (H7).
+    index('route_runs_client_cycle_idx').on(t.clientId, t.cycleId),
+  ],
+);
 
-export const runStops = pgTable('run_stops', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  runId: uuid('run_id')
-    .notNull()
-    .references(() => routeRuns.id),
-  meterId: uuid('meter_id')
-    .notNull()
-    .references(() => meters.id),
-  sequence: integer('sequence').notNull(),
-  status: runStopStatusEnum('status').notNull().default('pending'),
-  skipReasonId: uuid('skip_reason_id').references(() => skipReasons.id),
-  completedReadEventId: uuid('completed_read_event_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const runStops = pgTable(
+  'run_stops',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => routeRuns.id),
+    meterId: uuid('meter_id')
+      .notNull()
+      .references(() => meters.id),
+    sequence: integer('sequence').notNull(),
+    status: runStopStatusEnum('status').notNull().default('pending'),
+    skipReasonId: uuid('skip_reason_id').references(() => skipReasons.id),
+    completedReadEventId: uuid('completed_read_event_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // A meter appears once per run, and sequence is unique within a run (M7).
+    unique('run_stops_run_meter_uq').on(t.runId, t.meterId),
+    unique('run_stops_run_seq_uq').on(t.runId, t.sequence),
+    index('run_stops_run_idx').on(t.runId),
+  ],
+);
 
 // ── read_events (IMMUTABLE — ADR-002) ────────────────────────────────────────
-export const readEvents = pgTable('read_events', {
-  // client-generated UUIDv4 — the idempotency key (ADR-008)
-  id: uuid('id').primaryKey(),
-  meterId: uuid('meter_id')
-    .notNull()
-    .references(() => meters.id),
-  runStopId: uuid('run_stop_id').references(() => runStops.id),
-  readerId: uuid('reader_id')
-    .notNull()
-    .references(() => users.id),
-  value: doublePrecision('value').notNull(),
-  capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
-  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
-  sourceType: sourceTypeEnum('source_type').notNull(),
-  lat: doublePrecision('lat'),
-  lng: doublePrecision('lng'),
-  photoKey: text('photo_key'),
-  // Reader's free-text note, captured with the read. Immutable like the rest of
-  // the event (ADR-002) — set at insert, never updated.
-  note: text('note'),
-  annotations: jsonb('annotations').notNull().default({}),
-  /** consumption computed at ingest (value − prior), for history/baseline. */
-  consumption: doublePrecision('consumption'),
-  billable: boolean('billable').notNull().default(false),
-  exceptionId: uuid('exception_id'),
-  // NOTE: no updated_at — read events are never updated.
-});
+export const readEvents = pgTable(
+  'read_events',
+  {
+    // client-generated UUIDv4 — the idempotency key (ADR-008)
+    id: uuid('id').primaryKey(),
+    meterId: uuid('meter_id')
+      .notNull()
+      .references(() => meters.id),
+    runStopId: uuid('run_stop_id').references(() => runStops.id),
+    readerId: uuid('reader_id')
+      .notNull()
+      .references(() => users.id),
+    value: doublePrecision('value').notNull(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+    sourceType: sourceTypeEnum('source_type').notNull(),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    photoKey: text('photo_key'),
+    // Reader's free-text note, captured with the read. Immutable like the rest of
+    // the event (ADR-002) — set at insert, never updated.
+    note: text('note'),
+    annotations: jsonb('annotations').notNull().default({}),
+    /** consumption computed at ingest (value − prior), for history/baseline. */
+    consumption: doublePrecision('consumption'),
+    billable: boolean('billable').notNull().default(false),
+    exceptionId: uuid('exception_id'),
+    // NOTE: no updated_at — read events are never updated.
+  },
+  (t) => [
+    // Baseline window scan is by meter + capture time; the run-detail latest
+    // value scans by received time. read_events grows unbounded (H7).
+    index('read_events_meter_captured_idx').on(t.meterId, t.capturedAt),
+    index('read_events_meter_received_idx').on(t.meterId, t.receivedAt.desc()),
+    index('read_events_run_stop_idx').on(t.runStopId),
+  ],
+);
 
 // ── taxonomy lookup tables (ADR-003) ─────────────────────────────────────────
 export const severities = pgTable('severities', {
@@ -190,34 +226,42 @@ export const skipReasons = pgTable('skip_reasons', {
 });
 
 // ── exceptions ───────────────────────────────────────────────────────────────
-export const exceptions = pgTable('exceptions', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  readEventId: uuid('read_event_id')
-    .notNull()
-    .references(() => readEvents.id),
-  meterId: uuid('meter_id')
-    .notNull()
-    .references(() => meters.id),
-  clientId: uuid('client_id')
-    .notNull()
-    .references(() => clients.id),
-  typeId: uuid('type_id')
-    .notNull()
-    .references(() => exceptionTypes.id),
-  severityId: uuid('severity_id')
-    .notNull()
-    .references(() => severities.id),
-  status: exceptionStatusEnum('status').notNull().default('open'),
-  rereadCount: integer('reread_count').notNull().default(0),
-  actionedBy: uuid('actioned_by').references(() => users.id),
-  resolutionNote: text('resolution_note'),
-  // The read the supervisor certified as billable at resolution. Recorded here
-  // (not by mutating the immutable read — ADR-002) so export can compute final
-  // billability from the certification decision (W4).
-  certifiedReadEventId: uuid('certified_read_event_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const exceptions = pgTable(
+  'exceptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    readEventId: uuid('read_event_id')
+      .notNull()
+      .references(() => readEvents.id),
+    meterId: uuid('meter_id')
+      .notNull()
+      .references(() => meters.id),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id),
+    typeId: uuid('type_id')
+      .notNull()
+      .references(() => exceptionTypes.id),
+    severityId: uuid('severity_id')
+      .notNull()
+      .references(() => severities.id),
+    status: exceptionStatusEnum('status').notNull().default('open'),
+    rereadCount: integer('reread_count').notNull().default(0),
+    actionedBy: uuid('actioned_by').references(() => users.id),
+    resolutionNote: text('resolution_note'),
+    // The read the supervisor certified as billable at resolution. Recorded here
+    // (not by mutating the immutable read — ADR-002) so export can compute final
+    // billability from the certification decision (W4).
+    certifiedReadEventId: uuid('certified_read_event_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Export gathers a read's exceptions by read_event_id; console lists by meter (H7).
+    index('exceptions_read_event_idx').on(t.readEventId),
+    index('exceptions_meter_idx').on(t.meterId),
+  ],
+);
 
 // ── reread_tasks ─────────────────────────────────────────────────────────────
 export const rereadTasks = pgTable('reread_tasks', {
@@ -234,27 +278,39 @@ export const rereadTasks = pgTable('reread_tasks', {
 });
 
 // ── export_runs ──────────────────────────────────────────────────────────────
-export const exportRuns = pgTable('export_runs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  clientId: uuid('client_id')
-    .notNull()
-    .references(() => clients.id),
-  cycleId: text('cycle_id').notNull(),
-  ranBy: uuid('ran_by')
-    .notNull()
-    .references(() => users.id),
-  counts: jsonb('counts').notNull().default({}),
-  ackNote: text('ack_note'),
-  format: text('format').notNull().default('csv'),
-  filename: text('filename'),
-  // The rendered export is an immutable snapshot of what was sent to the client's
-  // billing system, kept in-row for audit and re-download (fileKey stays for a
-  // future object-storage offload of large bodies — ADR-023).
-  body: text('body'),
-  fileKey: text('file_key'),
-  supersededByRunId: uuid('superseded_by_run_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const exportRuns = pgTable(
+  'export_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id),
+    cycleId: text('cycle_id').notNull(),
+    ranBy: uuid('ran_by')
+      .notNull()
+      .references(() => users.id),
+    counts: jsonb('counts').notNull().default({}),
+    ackNote: text('ack_note'),
+    format: text('format').notNull().default('csv'),
+    filename: text('filename'),
+    // The rendered export is an immutable snapshot of what was sent to the client's
+    // billing system, kept in-row for audit and re-download (fileKey stays for a
+    // future object-storage offload of large bodies — ADR-023).
+    body: text('body'),
+    fileKey: text('file_key'),
+    supersededByRunId: uuid('superseded_by_run_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // At most ONE current (non-superseded) export per client+cycle — the DB-level
+    // guarantee behind the supersede transaction, so two concurrent "Generate"
+    // clicks can't both stay current (H4).
+    uniqueIndex('export_runs_current_uq')
+      .on(t.clientId, t.cycleId)
+      .where(sql`${t.supersededByRunId} is null`),
+    index('export_runs_client_cycle_idx').on(t.clientId, t.cycleId),
+  ],
+);
 
 // ── audit_log ────────────────────────────────────────────────────────────────
 export const auditLog = pgTable('audit_log', {

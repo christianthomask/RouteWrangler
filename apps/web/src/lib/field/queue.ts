@@ -2,7 +2,7 @@
 
 import { config } from '../config';
 import { authHeaders } from '../session';
-import { allActions, putAction } from './db';
+import { allActions, deleteAction, putAction } from './db';
 import {
   counts,
   stateFromIngest,
@@ -20,6 +20,50 @@ import {
  * idempotency key: a retry of an already-accepted read comes back `duplicate`
  * and is treated as synced.
  */
+/**
+ * Ask the browser to exempt our origin's storage (the IndexedDB queue) from
+ * eviction under storage pressure (M8). Best-effort and idempotent: where it's
+ * unsupported or denied the queue still works — it's just evictable, so an
+ * un-synced capture could be reclaimed. A grant makes that far less likely.
+ */
+async function requestPersistentStorage(): Promise<void> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+      await navigator.storage.persist();
+    }
+  } catch {
+    /* best-effort — nothing to recover if the request itself throws */
+  }
+}
+
+/**
+ * Upload a captured photo after its read has landed (H6, ADR-013). The read is
+ * never blocked by its photo: this runs best-effort after the event is accepted,
+ * the object key is derived server-side from the read-event id, and the read row
+ * is never mutated. Throws on failure so the caller can keep the local copy for
+ * a later retry.
+ */
+async function uploadPhoto(
+  readEventId: string,
+  dataUrl: string,
+  headers: Record<string, string>,
+): Promise<void> {
+  const contentType = /^data:([^;,]+)/.exec(dataUrl)?.[1] || 'image/jpeg';
+  const blob = await (await fetch(dataUrl)).blob(); // data URL → binary
+  const presign = await fetch(`${config.apiBaseUrl}/photos/presign`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify({ readEventId, contentType }),
+  });
+  if (!presign.ok) throw new Error(`presign ${presign.status}`);
+  const { uploadUrl, headers: putHeaders } = (await presign.json()) as {
+    uploadUrl: string;
+    headers: Record<string, string>;
+  };
+  const put = await fetch(uploadUrl, { method: 'PUT', headers: putHeaders, body: blob });
+  if (!put.ok) throw new Error(`upload ${put.status}`);
+}
+
 class FieldQueue {
   private mirror: QueuedAction[] = [];
   private listeners = new Set<() => void>();
@@ -41,7 +85,30 @@ class FieldQueue {
 
   async load() {
     if (this.loaded) return;
-    this.mirror = await allActions();
+    // Ask to keep the queue out of eviction before we lean on it (M8).
+    void requestPersistentStorage();
+    const all = await allActions();
+
+    // Reconcile reads stranded in `syncing` by a tab that died after POSTing but
+    // before the response landed (H5). Left alone they'd never be picked up by
+    // syncable() and would strand the capture forever. Rewinding to `pending` is
+    // safe to resend: the server dedups on the client-generated event id
+    // (ADR-008), so a replay comes back `duplicate` and is treated as synced.
+    for (const a of all) {
+      if (a.state === 'syncing') {
+        a.state = 'pending';
+        a.error = undefined;
+        await putAction(a);
+      }
+    }
+
+    // Prune actions confirmed synced in a prior session (M8): the server holds
+    // them and a fresh run fetch reflects them on load, so they no longer need
+    // to occupy the queue. Only terminal `synced` rows are dropped — this
+    // session's synced rows stay live so the run view can still show "Synced".
+    await Promise.all(all.filter((a) => a.state === 'synced').map((a) => deleteAction(a.id)));
+    this.mirror = all.filter((a) => a.state !== 'synced');
+
     this.loaded = true;
     this.emit();
     void this.sync();
@@ -68,14 +135,28 @@ class FieldQueue {
 
   async enqueueRead(read: ReadPayload): Promise<string> {
     const id = crypto.randomUUID();
-    await this.persist({ id, kind: 'read', state: 'pending', seq: this.nextSeq(), createdAt: Date.now(), read });
+    await this.persist({
+      id,
+      kind: 'read',
+      state: 'pending',
+      seq: this.nextSeq(),
+      createdAt: Date.now(),
+      read,
+    });
     void this.sync();
     return id;
   }
 
   async enqueueSkip(skip: SkipPayload): Promise<string> {
     const id = crypto.randomUUID();
-    await this.persist({ id, kind: 'skip', state: 'pending', seq: this.nextSeq(), createdAt: Date.now(), skip });
+    await this.persist({
+      id,
+      kind: 'skip',
+      state: 'pending',
+      seq: this.nextSeq(),
+      createdAt: Date.now(),
+      skip,
+    });
     void this.sync();
     return id;
   }
@@ -113,7 +194,22 @@ class FieldQueue {
             if (!res.ok) throw new Error(`ingest ${res.status}`);
             const json = await res.json();
             const status = json?.results?.[0]?.status ?? 'rejected';
-            await this.persist({ ...a, state: stateFromIngest(status) });
+            const landed = stateFromIngest(status);
+            await this.persist({ ...a, state: landed });
+
+            // Photo attaches after the read lands (H6, best-effort — the read is
+            // never blocked by it). On success we drop the local data URL to free
+            // IndexedDB. On failure the read stays synced; the photo is left in
+            // place (not auto-retried, since synced actions aren't re-sent) and
+            // is reclaimed on the next session's prune.
+            if (landed === 'synced' && a.read.photoDataUrl) {
+              try {
+                await uploadPhoto(a.id, a.read.photoDataUrl, headers);
+                await this.persist({ ...a, state: 'synced', read: { ...a.read, photoDataUrl: null } });
+              } catch {
+                /* read is safe; photo upload is best-effort */
+              }
+            }
           } else if (a.kind === 'skip' && a.skip) {
             const res = await fetch(
               `${config.apiBaseUrl}/runs/${a.skip.runId}/stops/${a.skip.stopId}/skip`,
@@ -127,7 +223,11 @@ class FieldQueue {
             await this.persist({ ...a, state: 'synced' });
           }
         } catch (e) {
-          await this.persist({ ...a, state: 'failed', error: e instanceof Error ? e.message : 'sync failed' });
+          await this.persist({
+            ...a,
+            state: 'failed',
+            error: e instanceof Error ? e.message : 'sync failed',
+          });
         }
       }
     } finally {

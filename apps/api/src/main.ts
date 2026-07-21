@@ -15,14 +15,18 @@ async function bootstrap() {
 
   // Request/response validation is Zod-based via @routewrangler/contracts
   // (ADR-001), not class-validator — so no global ValidationPipe here.
-  app.enableCors({ origin: true, credentials: true });
+  // CORS reflects only the configured allowlist in prod; unset → reflect any
+  // origin, for local dev only (M6). Set CORS_ORIGINS to the web origin(s).
+  app.enableCors({ origin: env.corsOrigins ?? true, credentials: true });
   app.enableShutdownHooks();
 
   await app.listen(env.PORT, '0.0.0.0');
 
   const logger = new Logger('bootstrap');
   logger.log(`routewrangler-api listening on :${env.PORT}`);
-  logger.log(`auth provider: ${env.AUTH_PROVIDER} (${env.authConfigured ? 'configured' : 'unconfigured'})`);
+  logger.log(
+    `auth provider: ${env.AUTH_PROVIDER} (${env.authConfigured ? 'configured' : 'unconfigured'})`,
+  );
   if (!env.authConfigured && !env.authDevBypass) {
     logger.warn('auth not configured — authenticated endpoints return 503 (see docs/runbook.md)');
   }

@@ -16,6 +16,8 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3001),
   DATABASE_URL: z.string().url(),
+  /** Comma-separated CORS allowlist. Unset → reflect any origin (dev only, M6). */
+  CORS_ORIGINS: z.string().optional(),
 
   // ── auth (OIDC — Cognito, Entra, or generic) ──────────────────────────────
   AUTH_PROVIDER: z.enum(['cognito', 'entra', 'oidc']).default('cognito'),
@@ -64,6 +66,8 @@ export type Env = z.infer<typeof EnvSchema> & {
   authDevBypass: boolean;
   /** True when the chosen storage provider is fully configured. */
   storageConfigured: boolean;
+  /** Parsed CORS allowlist, or null to reflect any origin (dev). */
+  corsOrigins: string[] | null;
 };
 
 function resolveOidc(p: z.infer<typeof EnvSchema>): OidcConfig | undefined {
@@ -93,11 +97,13 @@ function resolveOidc(p: z.infer<typeof EnvSchema>): OidcConfig | undefined {
       groupsClaim: p.OIDC_GROUPS_CLAIM ?? 'roles',
     };
   }
-  // generic oidc
-  if (!p.OIDC_ISSUER || !p.OIDC_JWKS_URI) return undefined;
+  // generic oidc — issuer is enough; JWKS is derived from it when not given,
+  // matching the Cognito path and .env.example's promise (H8). A clean prod
+  // deploy that sets only OIDC_ISSUER no longer bricks the whole API with 503s.
+  if (!p.OIDC_ISSUER) return undefined;
   return {
     issuer: p.OIDC_ISSUER,
-    jwksUri: p.OIDC_JWKS_URI,
+    jwksUri: p.OIDC_JWKS_URI ?? `${p.OIDC_ISSUER.replace(/\/+$/, '')}/.well-known/jwks.json`,
     audience: p.OIDC_AUDIENCE,
     groupsClaim: p.OIDC_GROUPS_CLAIM ?? 'groups',
   };
@@ -105,7 +111,9 @@ function resolveOidc(p: z.infer<typeof EnvSchema>): OidcConfig | undefined {
 
 function resolveStorageConfigured(p: z.infer<typeof EnvSchema>): boolean {
   if (p.STORAGE_PROVIDER === 's3') return Boolean(p.S3_BUCKET);
-  return Boolean(p.AZURE_STORAGE_ACCOUNT && p.AZURE_STORAGE_CONTAINER && p.AZURE_STORAGE_ACCOUNT_KEY);
+  return Boolean(
+    p.AZURE_STORAGE_ACCOUNT && p.AZURE_STORAGE_CONTAINER && p.AZURE_STORAGE_ACCOUNT_KEY,
+  );
 }
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
@@ -117,5 +125,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     authConfigured: Boolean(oidc),
     authDevBypass: parsed.AUTH_DEV_BYPASS && parsed.NODE_ENV !== 'production',
     storageConfigured: resolveStorageConfigured(parsed),
+    corsOrigins: parsed.CORS_ORIGINS
+      ? parsed.CORS_ORIGINS.split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : null,
   };
 }
