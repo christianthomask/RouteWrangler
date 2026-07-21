@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Brand } from '@/components/Brand';
+import { ClerkLogin } from '@/components/auth/ClerkLogin';
 import { authDevBypass, clerkConfigured, DEV_USERS, type DevUser } from '@/lib/config';
 import { signInDev } from '@/lib/session';
 import { fetchMe } from '@/lib/api';
@@ -95,6 +96,8 @@ export default function LoginPage() {
                 ))}
               </div>
             </>
+          ) : clerkConfigured ? (
+            <ClerkLogin />
           ) : (
             <p
               style={{
@@ -107,9 +110,7 @@ export default function LoginPage() {
                 margin: 'var(--rw-space-2) 0 0',
               }}
             >
-              {clerkConfigured
-                ? 'Redirecting to sign-in…'
-                : 'Identity provider pending setup (see docs/runbook.md).'}
+              Identity provider pending setup (see docs/runbook.md).
             </p>
           )}
 

@@ -129,7 +129,17 @@ never from the remote Claude Code session (it can't reach Cloudflare).
 2. **R2** — `wrangler r2 bucket create verameter-photos`; create an R2 API token
    (access key id + secret).
 3. **Clerk** — create an application; note the **publishable key** and the
-   **issuer** (`https://<slug>.clerk.accounts.dev`).
+   **issuer** (`https://<slug>.clerk.accounts.dev`). Then:
+   - **Enable Organizations** and create custom org roles `org:reader`,
+     `org:supervisor`, `org:admin`. Roles are provisioned into the DB from
+     org membership (the API is DB-authoritative — it does not read token
+     roles), so add each staff member to the org with the right role.
+   - Create a **JWT template named `api`** with an `aud` claim (e.g. `verameter-api`).
+     The web calls `getToken({ template: 'api' })`; the API verifies that `aud`
+     via `OIDC_AUDIENCE`, so it rejects any token not minted for it.
+   - Add a **webhook** → `https://<deployed-api>/webhooks/clerk`, subscribed to
+     `organizationMembership.created/updated/deleted`; note the **signing secret**
+     (`CLERK_WEBHOOK_SECRET`).
 4. **Cloudflare API token** — with Workers Scripts + Containers + R2 edit perms;
    note it and your **account id**.
 
@@ -138,17 +148,21 @@ Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DATABASE_URL`.
 Variables: `NEXT_PUBLIC_API_BASE_URL` (the deployed API URL),
 `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
 
-### API container runtime secrets/vars (set once via wrangler, from `apps/api`)
+### API container runtime secrets (set once via wrangler, from `apps/api`)
 ```bash
 wrangler secret put DATABASE_URL           # Neon direct connection string
 wrangler secret put S3_ACCESS_KEY_ID       # R2 access key id
 wrangler secret put S3_SECRET_ACCESS_KEY   # R2 secret
+wrangler secret put S3_ENDPOINT            # https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+wrangler secret put OIDC_ISSUER            # Clerk issuer, e.g. https://<slug>.clerk.accounts.dev
+wrangler secret put OIDC_JWKS_URI          # <issuer>/.well-known/jwks.json
+wrangler secret put OIDC_AUDIENCE          # aud of the Clerk "api" JWT template
+wrangler secret put CLERK_WEBHOOK_SECRET   # Svix secret for POST /webhooks/clerk
 ```
-Non-secret vars (add to `apps/api/wrangler.jsonc` `vars`, or the dashboard):
-`AUTH_PROVIDER=oidc`, `OIDC_ISSUER=<clerk issuer>`, `STORAGE_PROVIDER=s3`,
-`S3_BUCKET=verameter-photos`,
-`S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com`,
-`S3_FORCE_PATH_STYLE=true`, `AWS_REGION=auto`, `NODE_ENV=production`.
+Non-secret, non-identifying vars are committed in `apps/api/wrangler.jsonc`
+(`AUTH_PROVIDER=oidc`, `STORAGE_PROVIDER=s3`, `S3_BUCKET=verameter-photos`,
+`S3_FORCE_PATH_STYLE=true`, `AWS_REGION=auto`, `NODE_ENV=production`). Issuer,
+audience, endpoint and keys are secrets above (kept out of the public repo).
 
 ### Deploy
 Trigger the **Deploy (Cloudflare)** workflow. It: applies migrations to Neon →

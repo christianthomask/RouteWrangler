@@ -18,10 +18,27 @@ export function setToken(token: string): void {
   window.localStorage.setItem(TOKEN_KEY, token);
 }
 
+/** Clears the stored JWT without touching the Clerk session (bridge use). */
+export function clearToken(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(TOKEN_KEY);
+}
+
+/**
+ * The Clerk provider (when mounted) registers its `signOut` here so the single
+ * `signOut()` below ends the IdP session too — otherwise the token bridge would
+ * just mint a fresh token and re-sign the user in. Null in dev-bypass builds.
+ */
+let clerkSignOut: (() => void | Promise<void>) | null = null;
+export function registerClerkSignOut(fn: (() => void | Promise<void>) | null): void {
+  clerkSignOut = fn;
+}
+
 export function signOut(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(DEV_SUB_KEY);
   window.localStorage.removeItem(TOKEN_KEY);
+  if (clerkSignOut) void clerkSignOut();
 }
 
 export function isSignedIn(): boolean {

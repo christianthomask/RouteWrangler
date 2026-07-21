@@ -18,11 +18,26 @@
     "bindings": [{ "name": "API_CONTAINER", "class_name": "ApiContainer" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer"] }],
-  "observability": { "enabled": true }
-  // Runtime config is set as secrets/vars, NOT here:
-  //   wrangler secret put DATABASE_URL          (Neon direct connection string)
-  //   wrangler secret put S3_ACCESS_KEY_ID      (R2 access key)
-  //   wrangler secret put S3_SECRET_ACCESS_KEY  (R2 secret)
-  //   vars: AUTH_PROVIDER=oidc, OIDC_ISSUER (Clerk), STORAGE_PROVIDER=s3,
-  //         S3_BUCKET, S3_ENDPOINT (R2), S3_FORCE_PATH_STYLE=true, AWS_REGION=auto
+  "observability": { "enabled": true },
+
+  // Non-secret, non-identifying runtime config (safe to commit — public repo).
+  "vars": {
+    "NODE_ENV": "production",
+    "AUTH_PROVIDER": "oidc",
+    "STORAGE_PROVIDER": "s3",
+    "S3_BUCKET": "verameter-photos",
+    "S3_FORCE_PATH_STYLE": "true",
+    "AWS_REGION": "auto"
+  }
+
+  // Instance-specific + secret config is set once via wrangler, NOT here (keeps
+  // account ids / issuers / keys out of a public repo):
+  //   wrangler secret put DATABASE_URL           (Neon direct connection string)
+  //   wrangler secret put S3_ACCESS_KEY_ID        (R2 access key id)
+  //   wrangler secret put S3_SECRET_ACCESS_KEY    (R2 secret)
+  //   wrangler secret put S3_ENDPOINT             (https://<ACCOUNT_ID>.r2.cloudflarestorage.com)
+  //   wrangler secret put OIDC_ISSUER             (Clerk issuer, e.g. https://<slug>.clerk.accounts.dev)
+  //   wrangler secret put OIDC_JWKS_URI           (<issuer>/.well-known/jwks.json)
+  //   wrangler secret put OIDC_AUDIENCE           (aud of the Clerk "api" JWT template)
+  //   wrangler secret put CLERK_WEBHOOK_SECRET    (Svix secret for POST /webhooks/clerk)
 }

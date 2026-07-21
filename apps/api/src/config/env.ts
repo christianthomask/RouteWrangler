@@ -30,6 +30,8 @@ const EnvSchema = z.object({
   OIDC_JWKS_URI: z.string().url().optional(),
   OIDC_AUDIENCE: z.string().optional(),
   OIDC_GROUPS_CLAIM: z.string().optional(),
+  /** Svix signing secret for the Clerk membership webhook (role provisioning). */
+  CLERK_WEBHOOK_SECRET: z.string().optional(),
   /** Local-only auth shim (ADR-012). Never takes effect in production. */
   AUTH_DEV_BYPASS: bool,
 
