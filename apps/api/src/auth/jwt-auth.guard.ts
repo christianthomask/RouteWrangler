@@ -48,6 +48,11 @@ export class JwtAuthGuard implements CanActivate {
     if (!row) {
       throw new UnauthorizedException('no local user for this identity');
     }
+    // Deactivated staff keep their row (history FKs) but lose all access. This
+    // is the offboarding path when the row cannot be deleted.
+    if (!row.active) {
+      throw new UnauthorizedException('this account has been deactivated');
+    }
 
     const authUser: AuthUser = {
       id: row.id,

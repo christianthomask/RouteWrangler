@@ -29,29 +29,44 @@ describe('displayNameFrom', () => {
   });
 });
 
-/** Minimal fake Drizzle handle recording the one insert/delete chain each. */
-function fakeDb() {
-  const calls: { upsert?: unknown; deletedSub?: string } = {};
-  let deleteReturns: unknown[] = [{ id: 'row' }];
+/**
+ * Minimal fake Drizzle handle. Revocation is now update-then-delete: deactivate
+ * first (so access is revoked regardless), then try to reclaim the row. The
+ * fake records both, and `failDelete` simulates the foreign-key violation that
+ * staff with history always produce.
+ */
+function fakeDb(opts: { updateReturns?: unknown[]; failDelete?: boolean } = {}) {
+  const calls: { upsert?: unknown; updated?: unknown; deleted?: boolean } = {};
+  const updateReturns = opts.updateReturns ?? [{ id: 'row' }];
   const db = {
     insert: () => ({
       values: (v: unknown) => ({
-        onConflictDoUpdate: () => {
-          calls.upsert = v;
+        onConflictDoUpdate: (args: { set?: unknown }) => {
+          calls.upsert = { ...(v as object), ...(args.set as object) };
           return Promise.resolve();
         },
       }),
     }),
-    delete: () => ({
-      where: (cond: { sub?: string }) => ({
-        returning: () => {
-          calls.deletedSub = cond?.sub;
-          return Promise.resolve(deleteReturns);
-        },
+    update: () => ({
+      set: (v: unknown) => ({
+        where: () => ({
+          returning: () => {
+            calls.updated = v;
+            return Promise.resolve(updateReturns);
+          },
+        }),
       }),
     }),
+    delete: () => ({
+      where: () => {
+        calls.deleted = true;
+        return opts.failDelete
+          ? Promise.reject(new Error('violates foreign key constraint'))
+          : Promise.resolve([]);
+      },
+    }),
   } as unknown as Database;
-  return { db, calls, setDeleteReturns: (r: unknown[]) => (deleteReturns = r) };
+  return { db, calls };
 }
 
 // The fake's `where(cond)` receives Drizzle's SQL object, not our sub — so we
@@ -98,8 +113,7 @@ describe('ClerkWebhookService.handle', () => {
   });
 
   it('ignores a delete when no local row exists', async () => {
-    const { db, setDeleteReturns } = fakeDb();
-    setDeleteReturns([]);
+    const { db } = fakeDb({ updateReturns: [] });
     const out = await svc(db).handle(membership('organizationMembership.deleted', 'org:reader'));
     expect(out).toEqual({ action: 'ignored', reason: 'no local user for user_123' });
   });
@@ -110,17 +124,29 @@ describe('ClerkWebhookService.handle', () => {
     expect(out.action).toBe('ignored');
   });
 
-  it('defers when the delete hits a foreign-key violation', async () => {
-    const calls: { deletedSub?: string } = {};
-    const db = {
-      delete: () => ({
-        where: () => ({
-          returning: () => Promise.reject(new Error('violates foreign key constraint')),
-        }),
-      }),
-    } as unknown as Database;
-    void calls;
+  // The offboarding defect: staff with history cannot be deleted (FK
+  // references from runs/exceptions/audit). Revocation must not depend on the
+  // delete succeeding, or a departed reader keeps working API access.
+  it('deactivates rather than failing when the delete hits a foreign-key violation', async () => {
+    const { db, calls } = fakeDb({ failDelete: true });
     const out = await svc(db).handle(membership('organizationMembership.deleted', 'org:reader'));
-    expect(out).toEqual({ action: 'deferred', sub: 'user_123', reason: 'foreign-key references exist' });
+    expect(out).toEqual({ action: 'deactivated', sub: 'user_123' });
+    expect(calls.updated).toMatchObject({ active: false });
+  });
+
+  it('deactivates before attempting the delete', async () => {
+    const { db, calls } = fakeDb();
+    await svc(db).handle(membership('organizationMembership.deleted', 'org:reader'));
+    // Ordering is the whole point: if the delete ran first and threw, access
+    // would survive. The update must always have happened.
+    expect(calls.updated).toMatchObject({ active: false });
+    expect(calls.deleted).toBe(true);
+  });
+
+  it('re-activates a previously deactivated user on re-add', async () => {
+    const { db, calls } = fakeDb();
+    const out = await svc(db).handle(membership('organizationMembership.created', 'org:reader'));
+    expect(out).toEqual({ action: 'upserted', sub: 'user_123', role: 'reader' });
+    expect(calls.upsert).toMatchObject({ active: true });
   });
 });

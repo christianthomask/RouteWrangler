@@ -25,14 +25,23 @@ import {
   type ExceptionListResponse,
   type MeResponse,
   type MeterHistoryResponse,
+  type ReassignRequest,
   type ResolveRequest,
   type RunDetail,
+  type RunStatus,
   type SplitRequest,
   type TaxonomyResponse,
 } from '@routewrangler/contracts';
 import type { z } from 'zod';
 import { config } from './config';
 import { authHeaders } from './session';
+
+/** Server-side filters for `GET /runs` (supervisor/admin only, bar readerId). */
+export type RunFilters = {
+  readerId?: string;
+  status?: RunStatus;
+  unassigned?: boolean;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -99,13 +108,23 @@ export const fetchRun = (id: string) => request(`/runs/${id}`, RunDetailSchema);
 export const fetchRereadTasks = () => request('/reread-tasks', RereadTasksResponseSchema);
 export const fetchFieldMeterReads = (meterId: string) =>
   request(`/field/meters/${meterId}/reads`, FieldMeterReadsResponseSchema);
-export function fetchRuns(readerId?: string) {
-  return request(`/runs${readerId ? `?readerId=${readerId}` : ''}`, RunListResponseSchema);
+/**
+ * Run list. Readers get their own runs; supervisors/admins may filter by
+ * reader/status, or ask for the unassigned pool (`unassigned: true`).
+ */
+export function fetchRuns(filters: RunFilters = {}) {
+  const params = new URLSearchParams();
+  if (filters.readerId) params.set('readerId', filters.readerId);
+  if (filters.status) params.set('status', filters.status);
+  if (filters.unassigned) params.set('unassigned', 'true');
+  const qs = params.toString();
+  return request(`/runs${qs ? `?${qs}` : ''}`, RunListResponseSchema);
 }
 export const assignRun = (req: AssignRunRequest): Promise<RunDetail> =>
   request('/runs', RunDetailSchema, { method: 'POST', body: JSON.stringify(req) });
-export const reassignRun = (id: string, readerId: string): Promise<RunDetail> =>
-  request(`/runs/${id}/reassign`, RunDetailSchema, { method: 'POST', body: JSON.stringify({ readerId }) });
+/** Reassign a run; `readerId: null` releases it back to the unassigned pool. */
+export const reassignRun = (id: string, readerId: string | null): Promise<RunDetail> =>
+  request(`/runs/${id}/reassign`, RunDetailSchema, { method: 'POST', body: JSON.stringify({ readerId } satisfies ReassignRequest) });
 export const splitRun = (id: string, req: SplitRequest): Promise<RunDetail> =>
   request(`/runs/${id}/split`, RunDetailSchema, { method: 'POST', body: JSON.stringify(req) });
 

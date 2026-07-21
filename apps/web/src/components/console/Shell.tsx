@@ -11,6 +11,7 @@ import { signOut, isSignedIn } from '@/lib/session';
 
 const NAV = [
   { href: '/supervisor', label: 'Dashboard' },
+  { href: '/supervisor/runs', label: 'Runs' },
   { href: '/supervisor/exceptions', label: 'Exceptions' },
   { href: '/supervisor/roster', label: 'Roster' },
   { href: '/supervisor/exports', label: 'Exports' },

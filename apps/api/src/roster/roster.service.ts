@@ -15,7 +15,9 @@ export class RosterService {
     const readers = await this.db
       .select({ id: users.id, name: users.displayName })
       .from(users)
-      .where(eq(users.role, 'reader'));
+      // Deactivated staff keep their rows for history but must not appear as
+      // assignable readers.
+      .where(and(eq(users.role, 'reader'), eq(users.active, true)));
 
     const reads = new Map(
       (await this.db.select({ r: readEvents.readerId, n: count() }).from(readEvents).groupBy(readEvents.readerId)).map(

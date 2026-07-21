@@ -6,19 +6,30 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import type {
   AssignRunRequest,
   ReassignRequest,
   RunDetail,
   RunStatus,
   RunSummary,
+  Role,
   SkipReasonCode,
   SplitRequest,
 } from '@routewrangler/contracts';
 import { DB } from '../db/db.module';
 import type { Database } from '../db/client';
-import { meters, readEvents, routeRuns, routes, routeStops, runStops, skipReasons } from '../db/schema';
+import {
+  clients,
+  meters,
+  readEvents,
+  routeRuns,
+  routes,
+  routeStops,
+  runStops,
+  skipReasons,
+  users,
+} from '../db/schema';
 import { AuditService } from '../audit/audit.service';
 import { currentCycleId } from '../catalog/catalog.service';
 import { validateSplit, type StopLite } from './split';
@@ -35,21 +46,74 @@ export class RunsService {
     private readonly audit: AuditService,
   ) {}
 
-  async list(filter: { readerId?: string; status?: RunStatus }): Promise<RunSummary[]> {
+  async list(filter: {
+    readerId?: string;
+    status?: RunStatus;
+    unassigned?: boolean;
+  }): Promise<RunSummary[]> {
     const conds = [];
-    if (filter.readerId) conds.push(eq(routeRuns.readerId, filter.readerId));
+    if (filter.unassigned) conds.push(isNull(routeRuns.readerId));
+    else if (filter.readerId) conds.push(eq(routeRuns.readerId, filter.readerId));
     if (filter.status) conds.push(eq(routeRuns.status, filter.status));
+    return this.summaries(conds.length ? and(...conds) : undefined);
+  }
+
+  /**
+   * Run summaries with route/client/reader names and stop progress resolved in
+   * one query, so neither console has to render a bare UUID or fan out per run.
+   */
+  private async summaries(where: SQL | undefined): Promise<RunSummary[]> {
+    const done: SQL<number> = sql<number>`count(*) filter (where ${runStops.status} in ('read','skipped'))`;
     const rows = await this.db
-      .select()
+      .select({
+        run: routeRuns,
+        routeName: routes.name,
+        clientName: clients.name,
+        readerName: users.displayName,
+        stopCount: sql<number>`count(${runStops.id})`,
+        completedCount: done,
+      })
       .from(routeRuns)
-      .where(conds.length ? and(...conds) : undefined)
+      .innerJoin(routes, eq(routeRuns.routeId, routes.id))
+      .innerJoin(clients, eq(routeRuns.clientId, clients.id))
+      // left: an unassigned run still has to appear in the list.
+      .leftJoin(users, eq(routeRuns.readerId, users.id))
+      .leftJoin(runStops, eq(runStops.runId, routeRuns.id))
+      .where(where)
+      .groupBy(routeRuns.id, routes.name, clients.name, users.displayName)
       .orderBy(desc(routeRuns.runDate));
-    return rows.map(toSummary);
+
+    return rows.map((r) => ({
+      ...toSummary(r.run),
+      routeName: r.routeName,
+      clientName: r.clientName,
+      readerName: r.readerName ?? null,
+      stopCount: Number(r.stopCount),
+      completedCount: Number(r.completedCount),
+    }));
+  }
+
+  /**
+   * Readers may only touch runs assigned to them; supervisors and admins see
+   * everything (ADR-007). Scoping is a query concern rather than a guard
+   * concern, so endpoints reachable by a reader must call this explicitly —
+   * `@Roles` alone does not constrain *which* run is addressed.
+   */
+  async assertRunAccess(runId: string, actor: { id: string; role: Role }): Promise<void> {
+    if (actor.role !== 'reader') return;
+    const [run] = await this.db
+      .select({ readerId: routeRuns.readerId })
+      .from(routeRuns)
+      .where(eq(routeRuns.id, runId))
+      .limit(1);
+    // Same 404 whether the run is missing or simply someone else's, so the
+    // endpoint can't be used to probe for valid run ids.
+    if (!run || run.readerId !== actor.id) throw new NotFoundException('run not found');
   }
 
   async detail(runId: string): Promise<RunDetail> {
-    const [run] = await this.db.select().from(routeRuns).where(eq(routeRuns.id, runId)).limit(1);
-    if (!run) throw new NotFoundException('run not found');
+    const [summary] = await this.summaries(eq(routeRuns.id, runId));
+    if (!summary) throw new NotFoundException('run not found');
 
     const stopRows = await this.db
       .select({
@@ -71,7 +135,7 @@ export class RunsService {
     const lastValues = await this.latestValues(stopRows.map((s) => s.meterId));
 
     return {
-      ...toSummary(run),
+      ...summary,
       stops: stopRows.map((s) => ({
         id: s.id,
         meterId: s.meterId,
@@ -129,7 +193,10 @@ export class RunsService {
     return this.detail(runId);
   }
 
-  /** Reassign a run's reader — only before it starts (no reads yet). */
+  /**
+   * Reassign a run's reader — only before it starts (no reads yet).
+   * `readerId: null` releases the run instead, leaving it unassigned.
+   */
   async reassign(runId: string, req: ReassignRequest, actorId: string): Promise<RunDetail> {
     const [run] = await this.db.select().from(routeRuns).where(eq(routeRuns.id, runId)).limit(1);
     if (!run) throw new NotFoundException('run not found');
@@ -149,10 +216,10 @@ export class RunsService {
       .where(eq(routeRuns.id, runId));
     await this.audit.write({
       actorId,
-      action: 'run.reassigned',
+      action: req.readerId ? 'run.reassigned' : 'run.released',
       entity: 'route_run',
       entityId: runId,
-      meta: { readerId: req.readerId },
+      meta: { readerId: req.readerId, previousReaderId: run.readerId },
     });
     return this.detail(runId);
   }
@@ -224,12 +291,17 @@ export class RunsService {
   }
 }
 
-function toSummary(run: typeof routeRuns.$inferSelect): RunSummary {
+/** Identity fields only; callers layer on the resolved names and counts. */
+function toSummary(
+  run: typeof routeRuns.$inferSelect,
+): Omit<RunSummary, 'routeName' | 'clientName' | 'readerName' | 'stopCount' | 'completedCount'> {
   return {
     id: run.id,
     clientId: run.clientId,
     routeId: run.routeId,
-    readerId: run.readerId ?? '',
+    // An unassigned run reports null, not '' — the contract is nullable and the
+    // empty string would fail its uuid validation on the client.
+    readerId: run.readerId,
     runDate: run.runDate,
     cycleId: run.cycleId,
     status: run.status,

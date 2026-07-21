@@ -22,7 +22,7 @@ export interface ClerkMembershipEvent {
 export type WebhookOutcome =
   | { action: 'upserted'; sub: string; role: string }
   | { action: 'deleted'; sub: string }
-  | { action: 'deferred'; sub: string; reason: string }
+  | { action: 'deactivated'; sub: string }
   | { action: 'ignored'; reason: string };
 
 /**
@@ -63,7 +63,9 @@ export class ClerkWebhookService {
         .values({ cognitoSub: sub, displayName, role })
         .onConflictDoUpdate({
           target: users.cognitoSub,
-          set: { displayName, role, updatedAt: new Date() },
+          // `active: true` re-instates someone previously deactivated — a
+          // rehire, or a membership removed and restored.
+          set: { displayName, role, active: true, updatedAt: new Date() },
         });
       this.logger.log(`provisioned ${sub} as ${role}`);
       return { action: 'upserted', sub, role };
@@ -73,24 +75,30 @@ export class ClerkWebhookService {
   }
 
   /**
-   * Revokes access by deleting the local row. `users.id` is referenced by runs,
-   * exceptions, and audit rows (no cascade), so a delete can hit a foreign-key
-   * violation for staff with history — we defer those and log, rather than fail
-   * the webhook. A hard-offboarding path (reassign/anonymize) is future work.
+   * Revokes access. `users.id` is referenced by runs, exceptions and audit rows
+   * (no cascade), so staff with history cannot be deleted — the delete raises a
+   * foreign-key violation. Access revocation must not depend on that succeeding,
+   * so we **deactivate first** (which the auth guard enforces) and only then try
+   * to reclaim the row. Ordering matters: if the delete were attempted first and
+   * failed, a departed reader would keep working access.
    */
   private async revoke(sub: string): Promise<WebhookOutcome> {
+    const [deactivated] = await this.db
+      .update(users)
+      .set({ active: false, updatedAt: new Date() })
+      .where(eq(users.cognitoSub, sub))
+      .returning({ id: users.id });
+    if (!deactivated) return { action: 'ignored', reason: `no local user for ${sub}` };
+
+    // Access is already revoked at this point. Deleting is best-effort tidying
+    // for staff who never accumulated history.
     try {
-      const deleted = await this.db.delete(users).where(eq(users.cognitoSub, sub)).returning();
-      if (deleted.length === 0) return { action: 'ignored', reason: `no local user for ${sub}` };
-      this.logger.log(`revoked ${sub}`);
+      await this.db.delete(users).where(eq(users.cognitoSub, sub));
+      this.logger.log(`revoked ${sub} (row deleted)`);
       return { action: 'deleted', sub };
-    } catch (err) {
-      this.logger.warn(
-        `could not delete ${sub} (likely has history — manual offboarding needed): ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      return { action: 'deferred', sub, reason: 'foreign-key references exist' };
+    } catch {
+      this.logger.log(`revoked ${sub} (deactivated; row retained for history)`);
+      return { action: 'deactivated', sub };
     }
   }
 }

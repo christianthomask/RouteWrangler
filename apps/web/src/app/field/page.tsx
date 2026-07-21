@@ -26,22 +26,33 @@ export default function FieldTodayPage() {
       ) : runs.length === 0 ? (
         <EmptyState title="No runs assigned" hint="Your supervisor assigns routes to you; they'll show here." />
       ) : (
-        runs.map((r) => (
-          <Link
-            key={r.id}
-            href={`/field/runs/${r.id}`}
-            className="rw-card"
-            style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>Run · {r.runDate}</strong>
-              <span className="rw-badge">{r.status}</span>
-            </div>
-            <div style={{ color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-sm)', marginTop: 4 }}>
-              cycle {r.cycleId} · tap to open stops →
-            </div>
-          </Link>
-        ))
+        runs.map((r) => {
+          const pct = r.stopCount ? Math.round((r.completedCount / r.stopCount) * 100) : 0;
+          return (
+            <Link
+              key={r.id}
+              href={`/field/runs/${r.id}`}
+              className="rw-card"
+              style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <strong style={{ minWidth: 0 }}>{r.routeName}</strong>
+                <span className="rw-badge" style={{ flex: 'none' }}>{r.status}</span>
+              </div>
+              <div style={{ color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-sm)', marginTop: 4 }}>
+                {r.clientName} · {r.runDate} · cycle {r.cycleId}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 'var(--rw-space-3)' }}>
+                <div style={{ flex: 1, height: 8, background: 'var(--rw-surface-3)', borderRadius: 999 }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: 'var(--rw-brand)', borderRadius: 999 }} />
+                </div>
+                <span className="tabular" style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)', flex: 'none' }}>
+                  {r.completedCount}/{r.stopCount}
+                </span>
+              </div>
+            </Link>
+          );
+        })
       )}
     </div>
   );

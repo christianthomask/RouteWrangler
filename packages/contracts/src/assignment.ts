@@ -36,8 +36,13 @@ export const AssignRunRequestSchema = z.object({
 });
 export type AssignRunRequest = z.infer<typeof AssignRunRequestSchema>;
 
-/** Reassign a run's reader — allowed only before the run starts (W1). */
-export const ReassignRequestSchema = z.object({ readerId: z.string().uuid() });
+/**
+ * Reassign a run's reader — allowed only before the run starts (W1).
+ * `readerId: null` *releases* the run (unassign), which is how a supervisor
+ * takes a route back from a reader who is out; the run stays materialized and
+ * can be re-assigned later.
+ */
+export const ReassignRequestSchema = z.object({ readerId: z.string().uuid().nullable() });
 export type ReassignRequest = z.infer<typeof ReassignRequestSchema>;
 
 /** Carve a contiguous range of *pending* stops into a new run (ADR-005). */

@@ -25,15 +25,24 @@ export class RunsController {
     @CurrentUser() user: AuthUser,
     @Query('status') status?: RunStatus,
     @Query('readerId') readerId?: string,
+    @Query('unassigned') unassigned?: string,
   ): Promise<RunListResponse> {
-    const effectiveReader = user.role === 'reader' ? user.id : readerId;
-    const runs = await this.runs.list({ readerId: effectiveReader, status });
+    const isReader = user.role === 'reader';
+    const effectiveReader = isReader ? user.id : readerId;
+    const runs = await this.runs.list({
+      readerId: effectiveReader,
+      status,
+      // A reader is always clamped to their own runs, so they can never ask for
+      // the unassigned pool.
+      unassigned: !isReader && unassigned === 'true',
+    });
     return { runs };
   }
 
   /** GET /runs/:id — run detail with ordered stops (feeds simulator playback). */
   @Get(':id')
-  detail(@Param('id', ParseUUIDPipe) id: string): Promise<RunDetail> {
+  async detail(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser): Promise<RunDetail> {
+    await this.runs.assertRunAccess(id, user);
     return this.runs.detail(id);
   }
 
@@ -64,13 +73,15 @@ export class RunsController {
 
   /** POST /runs/:id/stops/:stopId/skip — reader skips a stop with a reason. */
   @Post(':id/stops/:stopId/skip')
-  skip(
+  async skip(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('stopId', ParseUUIDPipe) stopId: string,
     @Body() body: unknown,
+    @CurrentUser() user: AuthUser,
   ): Promise<RunDetail> {
     const parsed = SkipStopRequestSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    await this.runs.assertRunAccess(id, user);
     return this.runs.skipStop(id, stopId, parsed.data.skipReasonCode);
   }
 }

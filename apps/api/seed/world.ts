@@ -21,6 +21,51 @@ const NOMINAL_USAGE = 100; // matches simulator DEMO_NOMINAL_USAGE
 
 const routeName = (i: number) => `Route ${i + 1}`;
 
+/** Street name per route index, so an address matches where the pin actually is. */
+const STREETS = ['Higuera St', 'Marsh St', 'Osos St', 'Monterey St'];
+const streetName = (routeIdx: number) => STREETS[routeIdx % STREETS.length]!;
+
+// Meter placement. Stops are walked in sequence order, so their coordinates have
+// to advance along a line — a random scatter around the city centre makes the
+// route line zigzag and sends the "Directions" deep link to the wrong place.
+const METER_SPACING_M = 35; // door to door
+const STREET_HALF_WIDTH_M = 12; // odd/even sides of the street
+const M_PER_DEG_LAT = 111_320;
+
+/**
+ * Places a meter along its route's street: sequence walks down the street,
+ * consecutive stops alternate sides, and each route leaves the city centre on
+ * its own bearing so routes don't overlap. Deterministic — same serial always
+ * lands on the same spot. Coordinates are synthetic (these are invented service
+ * addresses), but geographically coherent, which is what the map needs.
+ */
+function meterLocation(
+  city: { lat: number; lng: number },
+  routeIdx: number,
+  meterIdx: number,
+  serial: string,
+): { lat: number; lng: number } {
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos((city.lat * Math.PI) / 180);
+  // Fan the routes out around the centre, each starting a short walk away.
+  const bearing = (routeIdx * 2 * Math.PI) / ROUTES_PER_CLIENT + 0.4;
+  const startM = 250;
+  // Along-street unit vector, and its perpendicular for the two sides.
+  const [ax, ay] = [Math.cos(bearing), Math.sin(bearing)];
+  const [px, py] = [-ay, ax];
+
+  const along = startM + meterIdx * METER_SPACING_M;
+  const side = meterIdx % 2 === 0 ? 1 : -1;
+  // A metre or two of wobble so pins don't look mechanically ruled.
+  const wobble = ((hashSeed(serial) % 100) - 50) / 25;
+
+  const east = ax * along + px * (side * STREET_HALF_WIDTH_M + wobble);
+  const north = ay * along + py * (side * STREET_HALF_WIDTH_M + wobble);
+  return {
+    lat: city.lat + north / M_PER_DEG_LAT,
+    lng: city.lng + east / mPerDegLng,
+  };
+}
+
 /** The demo route is client 0, route 0 — its stops line up with DEMO_ANOMALY_PLAN. */
 function demoKind(clientIdx: number, routeIdx: number, meterIdx: number): AnomalyKind {
   if (clientIdx === 0 && routeIdx === 0) return DEMO_ANOMALY_PLAN[meterIdx] ?? 'clean';
@@ -77,8 +122,7 @@ export async function seedWorld(db: Database, readerId: string, endDate: Date): 
         const kind = demoKind(ci, ri, mi);
         const dials = kind === 'rollover_in_band' || kind === 'rollover_oob' ? 4 : 5;
         const mId = meterId(serial);
-        const lat = c.lat + ((hashSeed(serial) % 1000) - 500) / 100000;
-        const lng = c.lng + ((hashSeed(`${serial}:lng`) % 1000) - 500) / 100000;
+        const { lat, lng } = meterLocation(c, ri, mi, serial);
 
         await db
           .insert(meters)
@@ -86,7 +130,8 @@ export async function seedWorld(db: Database, readerId: string, endDate: Date): 
             id: mId,
             clientId: cId,
             serial,
-            serviceAddress: `${100 + mi} Example St, ${c.name}`,
+            // Odd/even numbering matches the side of the street the pin is on.
+            serviceAddress: `${100 + mi * 2 + (mi % 2)} ${streetName(ri)}, ${c.name}`,
             lat,
             lng,
             registerDials: dials,

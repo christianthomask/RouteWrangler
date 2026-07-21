@@ -43,6 +43,13 @@ export const users = pgTable('users', {
   cognitoSub: text('cognito_sub').notNull().unique(),
   displayName: text('display_name').notNull(),
   role: roleEnum('role').notNull(),
+  /**
+   * Soft-deactivation. `users.id` is FK-referenced by runs, exceptions and
+   * audit rows without cascade, so a departed staff member with history cannot
+   * be hard-deleted. Deactivating revokes access while preserving that history;
+   * the auth guard refuses inactive rows.
+   */
+  active: boolean('active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

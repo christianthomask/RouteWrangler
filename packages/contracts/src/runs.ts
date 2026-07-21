@@ -30,10 +30,22 @@ export const RunSummarySchema = z.object({
   id: z.string().uuid(),
   clientId: z.string().uuid(),
   routeId: z.string().uuid(),
-  readerId: z.string().uuid(),
+  /** Null when the run is unassigned — a supervisor has released it (W1). */
+  readerId: z.string().uuid().nullable(),
   runDate: z.string(),
   cycleId: z.string(),
   status: RunStatusSchema,
+  /**
+   * Resolved names so both consoles can label a run without a second lookup.
+   * Without these a run reads as a bare UUID + date, which tells neither the
+   * reader nor the supervisor *which route* it is.
+   */
+  routeName: z.string(),
+  clientName: z.string(),
+  readerName: z.string().nullable(),
+  /** Progress, so a run list can show completion without fetching every detail. */
+  stopCount: z.number().int(),
+  completedCount: z.number().int(),
 });
 export type RunSummary = z.infer<typeof RunSummarySchema>;
 

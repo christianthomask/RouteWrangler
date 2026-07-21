@@ -77,7 +77,10 @@ export default function FieldRunPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-4)' }}>
       <div>
         <Link href="/field" style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)' }}>← Today</Link>
-        <h1 style={{ fontSize: 'var(--rw-text-xl)', margin: '6px 0 0' }}>Run · {run.runDate}</h1>
+        <h1 style={{ fontSize: 'var(--rw-text-xl)', margin: '6px 0 0' }}>{run.routeName}</h1>
+        <div style={{ color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-sm)', marginTop: 2 }}>
+          {run.clientName} · {run.runDate} · cycle {run.cycleId}
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
           <div style={{ flex: 1, height: 8, background: 'var(--rw-surface-3)', borderRadius: 999 }}>
             <div style={{ width: `${pct}%`, height: '100%', background: 'var(--rw-brand)', borderRadius: 999 }} />
@@ -106,6 +109,9 @@ export default function FieldRunPage() {
                 <span className="tabular" style={{ color: 'var(--rw-text-muted)', width: 26, flex: 'none' }}>{s.sequence + 1}</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 500 }}>{s.meterSerial}</div>
+                  <div style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.serviceAddress}
+                  </div>
                   <div style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)' }}>
                     last read {s.lastValue ?? '—'}
                   </div>

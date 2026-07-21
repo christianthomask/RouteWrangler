@@ -37,6 +37,12 @@ export default function RunDetailPage() {
     [readers],
   );
 
+  /** Server-resolved name wins; fall back to the roster, then to "Unassigned". */
+  function assigneeLabel(r: RunDetail): string {
+    if (!r.readerId) return 'Unassigned';
+    return r.readerName ?? readerName(r.readerId);
+  }
+
   if (error) return <EmptyState title="Couldn't load this run" hint={error} />;
   if (!run) return <Loading />;
 
@@ -66,6 +72,20 @@ export default function RunDetailPage() {
     }
   }
 
+  async function doRelease() {
+    setBusy(true);
+    setError(null);
+    try {
+      setRun(await reassignRun(id, null));
+      setReassignTo('');
+      setMsg('Run released — it is now unassigned.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'release failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function doSplit() {
     if (!splitTo || selected.size === 0) return;
     setBusy(true);
@@ -85,10 +105,19 @@ export default function RunDetailPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-5)' }}>
       <div>
-        <Link href="/supervisor" style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)' }}>← Dashboard</Link>
-        <h1 style={{ fontSize: 'var(--rw-text-2xl)', margin: '8px 0 0' }}>Run · {run.runDate}</h1>
+        <Link href="/supervisor/runs" style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)' }}>← All runs</Link>
+        <h1 style={{ fontSize: 'var(--rw-text-2xl)', margin: '8px 0 0' }}>{run.routeName}</h1>
         <p style={{ margin: '4px 0 0', color: 'var(--rw-text-muted)', fontSize: 'var(--rw-text-sm)' }}>
-          Reader {readerName(run.readerId)} · cycle {run.cycleId} · <span className="rw-badge">{run.status}</span>
+          {run.clientName} · {run.runDate} · cycle {run.cycleId} · <span className="rw-badge">{run.status}</span>
+        </p>
+        <p style={{ margin: '4px 0 0', fontSize: 'var(--rw-text-sm)' }}>
+          Reader{' '}
+          {run.readerId ? (
+            <strong>{assigneeLabel(run)}</strong>
+          ) : (
+            <span className="rw-badge" style={{ color: 'var(--rw-warning)' }}>Unassigned</span>
+          )}
+          <span style={{ color: 'var(--rw-text-muted)' }}> · {run.completedCount}/{run.stopCount} done</span>
         </p>
       </div>
 
@@ -139,13 +168,16 @@ export default function RunDetailPage() {
           </section>
 
           <section className="rw-card">
-            <h2 style={cardTitle}>Reassign whole run</h2>
+            <h2 style={cardTitle}>{run.readerId ? 'Reassign whole run' : 'Assign this run'}</h2>
             {started ? (
               <p style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)', margin: 0 }}>
                 Run has started — use a split for mid-run changes.
               </p>
             ) : (
               <>
+                <p style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)', margin: '0 0 var(--rw-space-3)' }}>
+                  Currently {run.readerId ? `assigned to ${assigneeLabel(run)}` : 'unassigned'}.
+                </p>
                 <label><span className="rw-label">Reader</span>
                   <select className="rw-input" value={reassignTo} onChange={(e) => setReassignTo(e.target.value)}>
                     <option value="">Select…</option>
@@ -155,8 +187,18 @@ export default function RunDetailPage() {
                   </select>
                 </label>
                 <button className="rw-button rw-button--ghost" style={{ width: '100%', marginTop: 'var(--rw-space-3)' }} disabled={busy || !reassignTo} onClick={doReassign}>
-                  Reassign run
+                  {run.readerId ? 'Reassign run' : 'Assign run'}
                 </button>
+                {run.readerId && (
+                  <button
+                    className="rw-button rw-button--ghost"
+                    style={{ width: '100%', marginTop: 'var(--rw-space-2)', color: 'var(--rw-danger)' }}
+                    disabled={busy}
+                    onClick={doRelease}
+                  >
+                    Release / unassign
+                  </button>
+                )}
               </>
             )}
           </section>
