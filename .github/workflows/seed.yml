@@ -34,9 +34,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      # The seed imports @routewrangler/contracts, which resolves to dist/ — so
-      # the workspace package has to be built before tsx can load it.
-      - run: pnpm --filter @routewrangler/contracts build
+      # The seed imports @routewrangler/contracts and @routewrangler/simulator,
+      # both of which resolve to dist/ — so the workspace packages have to be
+      # built before tsx can load them.
+      - run: pnpm --filter './packages/*' build
       # No AWS credentials here, so the seed runs in LOCAL-ONLY mode: it writes
       # Postgres rows with `local-only:` subs and does not touch any identity
       # provider. Real staff are provisioned by the Clerk webhook, not by this.
