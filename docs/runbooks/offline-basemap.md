@@ -87,10 +87,22 @@ Worker to deploy:
 Both paths are already matched by the field service worker's cache-first rule
 (`/tiles/`, `/map/`), so no SW change is needed.
 
-> **Known gap:** glyphs and sprites are still fetched from
-> `protomaps.github.io`, so **labels do not render offline** — streets and water
-> do. Closing it means mirroring the three Noto Sans font stacks and the v4
-> sprite sheet into the same bucket and repointing `glyphs`/`sprite`.
+- `apps/web/src/app/map/fonts/[stack]/[range]/route.ts` and
+  `apps/web/src/app/map/sprites/[...file]/route.ts` → the glyph and sprite
+  assets, mirrored into the same bucket so the map has **no external runtime
+  dependency at all**. Both allowlist what they'll serve (three font stacks,
+  four sprite objects) rather than proxying arbitrary keys.
+
+> **Watch the space encoding.** Font stack names contain spaces, and R2 keys are
+> stored with a **literal space** (`fonts/Noto Sans Regular/0-255.pbf`). Uploading
+> with `%20` in the key creates an object that is permanently unreachable: the
+> public endpoint percent-decodes the request path and then looks for a key with
+> a real space. Verify one object over its public URL before bulk-uploading.
+
+> **Rate limits.** The `r2.dev` endpoint throttles aggressively — a 16-way
+> parallel sweep drew HTTP 429s. Uploads and any bulk verification need bounded
+> concurrency with backoff, and it's part of why the proxy routes set a
+> year-long immutable cache.
 
 ## 4. Set the env and deploy
 

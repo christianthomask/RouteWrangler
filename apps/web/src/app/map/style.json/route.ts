@@ -7,9 +7,11 @@ import { layers, namedFlavor } from '@protomaps/basemaps';
  * handler (a tile template, not `pmtiles://`) so the field service worker can
  * cache it and lib/field/mapCache.ts can pre-warm it for offline runs.
  *
- * KNOWN GAP: glyphs and sprites are still fetched from protomaps.github.io, so
- * map *labels* and icons will not render with no signal even though the tile
- * geometry will. Self-hosting those assets is tracked separately.
+ * Glyphs and sprites are served the same way, from `/map/fonts/` and
+ * `/map/sprites/` — both mirrored from protomaps.github.io into the same R2
+ * bucket as the tiles. That closes the old gap where labels and icons vanished
+ * with no signal even though the tile geometry still drew: every asset the map
+ * needs is now same-origin under a path the service worker caches.
  */
 
 const SOURCE = 'protomaps';
@@ -35,8 +37,9 @@ export async function GET(req: Request): Promise<Response> {
       },
     },
     layers: layers(SOURCE, namedFlavor('light'), { lang: 'en' }),
-    glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
-    sprite: 'https://protomaps.github.io/basemaps-assets/sprites/v4/light',
+    glyphs: `${origin}/map/fonts/{fontstack}/{range}.pbf`,
+    // A *base* URL — MapLibre appends `.json`/`.png` and the `@2x` pair itself.
+    sprite: `${origin}/map/sprites/v4/light`,
   };
 
   return new Response(JSON.stringify(style), {

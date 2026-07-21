@@ -14,6 +14,12 @@ import { boundsOf, padBBox, tilesForBBox } from './geo';
  * Only tile-template vector sources can be pre-warmed this way; a `pmtiles://`
  * source (single-file byte ranges) is skipped — the runbook serves tiles via a
  * Worker as {z}/{x}/{y} precisely so offline caching is simple and reliable.
+ *
+ * Label assets (glyphs, sprites) are warmed alongside the tiles. Geometry
+ * without labels is a map of unnamed streets, which is close to useless for
+ * finding an address — and the two would otherwise cache on different
+ * schedules, so a reader who opened a run and went straight offline would get
+ * one and not the other.
  */
 
 const MIN_ZOOM = 13;
@@ -44,9 +50,11 @@ export async function warmRouteTiles(stops: Located[]): Promise<WarmResult> {
   if (templates.length === 0) return nil('no-templates');
 
   const tiles = tilesForBBox(padBBox(b, 0.2), MIN_ZOOM, MAX_ZOOM, 900);
-  const urls = tiles.flatMap((t) =>
-    templates.map((tpl) =>
-      tpl.replace('{z}', String(t.z)).replace('{x}', String(t.x)).replace('{y}', String(t.y)),
+  const urls = labelAssetUrls().concat(
+    tiles.flatMap((t) =>
+      templates.map((tpl) =>
+        tpl.replace('{z}', String(t.z)).replace('{x}', String(t.x)).replace('{y}', String(t.y)),
+      ),
     ),
   );
 
@@ -60,6 +68,30 @@ export async function warmRouteTiles(stops: Located[]): Promise<WarmResult> {
     }
   });
   return { cached, attempted: urls.length, skipped: null };
+}
+
+/**
+ * Glyph and sprite URLs to warm alongside the tiles. These are the same for
+ * every route, so warming them repeatedly is a cache hit, not extra traffic.
+ *
+ * Only the two lowest glyph ranges are warmed: 0–255 (ASCII + Latin-1) and
+ * 256–511 (Latin Extended-A) cover US street and place names. The full set is
+ * 256 ranges per stack — ~10 MiB — which is not worth pushing onto a field
+ * device for names it will never render. Anything outside those ranges falls
+ * back to fetching on demand, so it degrades to unlabeled rather than broken.
+ */
+function labelAssetUrls(): string[] {
+  const stacks = ['Noto Sans Regular', 'Noto Sans Medium', 'Noto Sans Italic'];
+  const ranges = ['0-255', '256-511'];
+  const glyphs = stacks.flatMap((stack) =>
+    ranges.map((range) => `/map/fonts/${encodeURIComponent(stack)}/${range}.pbf`),
+  );
+  // MapLibre picks the @2x variants on hi-dpi screens, which most phones are —
+  // warm both so the choice can't leave a reader without icons.
+  const sprites = ['light.json', 'light.png', 'light@2x.json', 'light@2x.png'].map(
+    (f) => `/map/sprites/v4/${f}`,
+  );
+  return [...glyphs, ...sprites];
 }
 
 /** Pull the {z}/{x}/{y} tile templates out of the configured MapLibre style. */

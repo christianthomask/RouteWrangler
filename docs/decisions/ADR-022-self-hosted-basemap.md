@@ -57,8 +57,14 @@ self-hosted PMTiles on R2, served as `{z}/{x}/{y}` — is unchanged.
 - Both routes live in the existing Next.js app rather than a separate Worker, so
   there is no additional deployable.
 
-Still open: glyphs and sprites are fetched from `protomaps.github.io`, so labels
-do not render offline. Streets, water and landuse do.
+- **Glyphs and sprites are mirrored too.** They initially loaded from
+  `protomaps.github.io`, which meant labels vanished offline — a map of unnamed
+  streets, which is close to useless for finding an address. All three Noto Sans
+  stacks (768 glyph ranges) and the v4 sprite sheet now live in the same bucket
+  and are served same-origin, so the basemap has **no external runtime
+  dependency**. `warmRouteTiles` prefetches the two lowest glyph ranges plus the
+  sprites alongside the tiles; the remaining ranges fetch on demand, so a
+  non-Latin name degrades to unlabeled rather than broken.
 
 ## Consequences
 
