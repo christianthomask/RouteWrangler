@@ -1,12 +1,22 @@
 name: Deploy (Cloudflare)
 
 # Deploys run where Cloudflare is reachable (GitHub-hosted runners), not from the
-# Claude Code session. Manual by default; enable the push trigger once secrets are
-# set. See docs/runbook.md → "Cloudflare deploy".
+# Claude Code session. See docs/runbook.md → "Cloudflare deploy".
+#
+# Auto-deploys main — but only after CI has gone green on that exact commit.
+# Triggering on `push` directly would ship code whose tests never ran (or failed),
+# and the first thing a deploy does is migrate the production database. Chaining
+# off CI reuses its verification (lint, typecheck, migrations against a real
+# Postgres, full test suite) instead of duplicating it here.
+#
+# workflow_dispatch stays for forced deploys — re-running migrations, or shipping
+# without waiting on CI.
 on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-  # push:
-  #   branches: [main]
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -15,8 +25,16 @@ concurrency:
 jobs:
   migrate:
     runs-on: ubuntu-latest
+    # A CI run that failed or was cancelled must not deploy. Skipping here also
+    # skips deploy-web/deploy-api, which depend on this job.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # workflow_run checks out the default branch by default, which is not
+          # necessarily the commit CI just verified. Pin to that exact sha so we
+          # deploy what was tested.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
@@ -34,6 +52,10 @@ jobs:
         working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Same pinned sha as the migrate job — all three must build the one
+          # commit CI verified, not whatever main points at now.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
@@ -59,6 +81,10 @@ jobs:
         working-directory: apps/api
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Same pinned sha as the migrate job — all three must build the one
+          # commit CI verified, not whatever main points at now.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }

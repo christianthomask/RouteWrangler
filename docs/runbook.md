@@ -165,9 +165,22 @@ Non-secret, non-identifying vars are committed in `apps/api/wrangler.jsonc`
 audience, endpoint and keys are secrets above (kept out of the public repo).
 
 ### Deploy
-Trigger the **Deploy (Cloudflare)** workflow. It: applies migrations to Neon →
-builds the web app with OpenNext and `wrangler deploy` (Worker) → builds/pushes
-the API image and deploys the container Worker.
+**Pushing to `main` deploys automatically** — but only once **CI** has gone green
+on that same commit. Deploy chains off CI (`workflow_run`) rather than off the
+push, because the first thing it does is migrate the production database, and CI
+is what proves the migration and the code are sound (it lints, typechecks, runs
+migrations against a real Postgres, and runs the full suite). All three deploy
+jobs check out the exact sha CI verified, not whatever `main` points at by then.
+
+The pipeline is: applies migrations to Neon → builds the web app with OpenNext
+and `wrangler deploy` (Worker) → builds/pushes the API image and deploys the
+container Worker.
+
+If CI fails, nothing deploys. To ship without waiting on CI — or to re-run
+migrations against an unchanged tree — dispatch **Deploy (Cloudflare)** manually.
+
+> A failing migration is a safe failure: `migrate` runs before both deploy jobs,
+> so the running web and API are left untouched.
 
 > **Beta caveat (ADR-019):** Cloudflare Containers is beta and this path is
 > unverified. If it misbehaves, host the root `Dockerfile` image on **Fly/Render**
