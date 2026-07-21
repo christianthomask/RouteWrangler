@@ -1,19 +1,29 @@
-import { Container, getContainer } from '@cloudflare/containers';
+import { Container, getContainer, type ContainerOptions } from '@cloudflare/containers';
 
 /**
  * Cloudflare Containers wrapper for the NestJS API (ADR-019). A thin Worker
  * routes every request to the container instance, which runs the unmodified Nest
  * server on port 3001. Scales to zero after idle.
  *
- * NOTE: Cloudflare Containers is beta and this path is NOT yet verified against a
- * live account (the Claude Code session can't reach Cloudflare). Finalize/deploy
- * from a local Claude Code instance (Cloudflare MCP + `wrangler login`) or via
- * the deploy workflow. Fallback: host this same image on Fly/Render and point
- * the web app's NEXT_PUBLIC_API_BASE_URL at it — see docs/runbook.md.
+ * Cloudflare does NOT auto-inject the Worker's `vars`/secrets into the container
+ * process — they live on the Worker's `env`. We forward every string-valued
+ * binding into the container so the Nest app's boot-time env validation
+ * (config/env.ts: DATABASE_URL, AUTH_PROVIDER, OIDC_*, S3_*, …) sees them. The
+ * `API_CONTAINER` Durable Object binding is an object, so the string filter
+ * skips it; new secrets are forwarded automatically.
  */
-export class ApiContainer extends Container {
+export class ApiContainer extends Container<Env> {
   defaultPort = 3001;
   sleepAfter = '15m';
+
+  constructor(ctx: DurableObjectState, env: Env, options?: ContainerOptions) {
+    super(ctx, env, options);
+    const envVars: Record<string, string> = {};
+    for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+      if (typeof value === 'string') envVars[key] = value;
+    }
+    this.envVars = envVars;
+  }
 }
 
 interface Env {
