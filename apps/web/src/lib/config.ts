@@ -10,11 +10,13 @@ export const config = {
   apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001',
   clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '',
   /**
-   * MapLibre style JSON for the field basemap (ADR-022). Self-hosted: the style
-   * points at our PMTiles vector source on R2. Empty until the tile packs are
-   * provisioned — the map degrades to the dependency-free SVG plot until then.
+   * MapLibre style JSON for the field basemap (ADR-022). Self-hosted: the app
+   * serves its own style at /map/style.json, backed by the PMTiles packs on R2
+   * via the /tiles/{z}/{x}/{y} handler — so the basemap is on by default. Set
+   * NEXT_PUBLIC_MAP_STYLE_URL to point at a different style, or to '' to force
+   * the dependency-free SVG fallback plot.
    */
-  mapStyleUrl: process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? '',
+  mapStyleUrl: process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? '/map/style.json',
 };
 
 export const clerkConfigured = Boolean(config.clerkPublishableKey);

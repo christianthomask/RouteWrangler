@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.12.0",
+    "@protomaps/basemaps": "5.7.2",
     "@routewrangler/contracts": "workspace:*",
     "maplibre-gl": "^5.24.0",
     "next": "^15.1.4",

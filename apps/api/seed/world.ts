@@ -137,7 +137,19 @@ export async function seedWorld(db: Database, readerId: string, endDate: Date): 
             registerDials: dials,
             accessNotes: mi === 0 ? 'Beware of dog' : null,
           })
-          .onConflictDoNothing({ target: meters.id });
+          // Location and address are re-applied on conflict: the seeded world is
+          // declarative, so re-running must converge an already-seeded database
+          // onto the current layout rather than leaving stale coordinates behind.
+          // Read history is keyed separately and is untouched by this.
+          .onConflictDoUpdate({
+            target: meters.id,
+            set: {
+              serviceAddress: `${100 + mi * 2 + (mi % 2)} ${streetName(ri)}, ${c.name}`,
+              lat,
+              lng,
+              updatedAt: new Date(),
+            },
+          });
 
         await db
           .insert(routeStops)

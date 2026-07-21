@@ -17,7 +17,11 @@ import { boundsOf, padBBox, tilesForBBox } from './geo';
  */
 
 const MIN_ZOOM = 13;
-const MAX_ZOOM = 16;
+// The tile packs are built to z15 (see the offline-basemap runbook), so z16
+// requests can only ever come back empty — and because the batch is capped,
+// they would crowd out z13–15 tiles the reader actually needs offline.
+// MapLibre overzooms past the source maxzoom on its own, so nothing is lost.
+const MAX_ZOOM = 15;
 const CONCURRENCY = 8;
 
 export interface WarmResult {

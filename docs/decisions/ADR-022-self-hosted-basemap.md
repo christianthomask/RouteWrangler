@@ -13,10 +13,10 @@ and it has to survive with no signal, which is exactly where they work.
 
 Self-host the basemap; render it client-side; cache it per route.
 
-- **Tiles: self-hosted PMTiles on R2.** Vector tiles are built from OpenStreetMap
-  with `planetiler` into a single `.pmtiles` archive per service region and stored
-  on **R2** (our existing storage vendor, ADR-015/019). No third-party map vendor,
-  no API keys, no per-tile fees — consistent with the vendor-neutral tenet.
+- **Tiles: self-hosted PMTiles on R2.** Vector tiles come from OpenStreetMap as a
+  single `.pmtiles` archive per service region, stored on **R2** (our existing
+  storage vendor, ADR-015/019). No third-party map vendor, no API keys, no
+  per-tile fees — consistent with the vendor-neutral tenet.
 - **Serve as `{z}/{x}/{y}`, not `pmtiles://`.** A small Cloudflare Worker reads the
   PMTiles from R2 and returns individual tiles at `/tiles/{z}/{x}/{y}` on the app
   origin, with the MapLibre style at `/map/style.json`. Plain 200 responses on the
@@ -36,6 +36,29 @@ Self-host the basemap; render it client-side; cache it per route.
   URL is configured *and* it loads; with no style, no WebGL, or a load error it
   falls back to the ADR-021 SVG plot. Until the tile packs are provisioned the app
   ships today's behavior, unchanged.
+
+## Amendments (provisioning, 2026-07-21)
+
+Two details changed when the packs were actually built. The decision above —
+self-hosted PMTiles on R2, served as `{z}/{x}/{y}` — is unchanged.
+
+- **Packs are extracted from the Protomaps daily build, not built with
+  planetiler.** `pmtiles extract` pulls a bbox from the published planet archive
+  over HTTP range requests in seconds, with no JVM and no `.osm.pbf` download.
+  Consequence: tiles use the **protomaps** schema, not OpenMapTiles, so the style
+  is generated from `@protomaps/basemaps` rather than adapted from an
+  OpenMapTiles style.
+- **The tiles bucket is public; the original plan said private.** The packs are
+  unmodified public OpenStreetMap data, so there is nothing in them to protect,
+  and public range reads let the tile route be a thin proxy with no R2 binding.
+  CORS is restricted to the app origins so the bandwidth isn't hotlinked. This
+  applies *only* to `verameter-tiles` — `verameter-photos` holds customer premises
+  imagery and stays private with presigned access.
+- Both routes live in the existing Next.js app rather than a separate Worker, so
+  there is no additional deployable.
+
+Still open: glyphs and sprites are fetched from `protomaps.github.io`, so labels
+do not render offline. Streets, water and landuse do.
 
 ## Consequences
 
