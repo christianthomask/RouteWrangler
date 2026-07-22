@@ -1,4 +1,4 @@
-import type { ExceptionCode, ValidationConfig } from '@routewrangler/contracts';
+import type { ExceptionCode, ValidationConfig } from '../validation';
 
 /** A prior read for the same meter, oldest-first (trailing baseline window). */
 export interface PriorRead {

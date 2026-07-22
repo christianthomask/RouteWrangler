@@ -19,3 +19,11 @@ export * from './assignment';
 export * from './field';
 export * from './exports';
 export * from './staff';
+
+/**
+ * The read-validation engine. Pure and dependency-free, so the field app can run
+ * the same rules the server will apply — a reader learns a value looks anomalous
+ * while standing at the meter, not from an exception raised hours later.
+ */
+export * from './engine/types';
+export * from './engine/engine';

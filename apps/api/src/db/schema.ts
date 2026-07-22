@@ -60,6 +60,14 @@ export const clients = pgTable('clients', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
   state: text('state').notNull(),
+  /**
+   * IANA zone defining this client's working day. Run dates are calendar dates
+   * in the utility's own day, so "today" has to be answered per client — a
+   * single server-wide zone reports a Pacific client's in-flight runs as overdue
+   * from mid-afternoon UTC onward. Defaults to APP_TIMEZONE's value for existing
+   * rows; every current client is Pacific.
+   */
+  timezone: text('timezone').notNull().default('America/Los_Angeles'),
   cycleLengthDays: integer('cycle_length_days').notNull().default(30),
   cycleAnchorDay: integer('cycle_anchor_day').notNull().default(1),
   exportProfile: jsonb('export_profile').notNull().default({ format: 'csv' }),

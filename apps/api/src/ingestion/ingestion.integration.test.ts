@@ -2,7 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db/client';
-import { clients, meters, readEvents, users } from '../db/schema';
+import {
+  clients,
+  meters,
+  readEvents,
+  routeRuns,
+  routes,
+  runStops,
+  skipReasons,
+  users,
+} from '../db/schema';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import { IngestionService } from './ingestion.service';
 
@@ -71,5 +80,125 @@ suite('ingestion idempotency (integration)', () => {
 
     const rows = await db.select().from(readEvents).where(eq(readEvents.id, event.id));
     expect(rows).toHaveLength(1); // exactly once
+  });
+});
+
+/**
+ * The stop's read of record (UAT round 2 blocker). The field app invites two
+ * things the ingestion path used to discard: correcting a mistyped value, and
+ * reading a stop that was skipped earlier and later became reachable. Both
+ * stored the read but left `completed_read_event_id` untouched, so the wrong
+ * value billed in the first case and nothing billed in the second.
+ */
+suite('run stop read of record (integration)', () => {
+  const { db, sql } = createDb(url ?? '');
+  const svc = new IngestionService(db, new TaxonomyService(db));
+
+  afterAll(async () => {
+    await sql.end();
+  });
+
+  async function fixture() {
+    const clientId = randomUUID();
+    const routeId = randomUUID();
+    const meterId = randomUUID();
+    const readerId = randomUUID();
+    const runId = randomUUID();
+    const stopId = randomUUID();
+
+    await db.insert(clients).values({ id: clientId, name: `T-${clientId.slice(0, 8)}`, state: 'CA' });
+    await db.insert(routes).values({ id: routeId, clientId, name: 'R1' });
+    await db.insert(meters).values({
+      id: meterId,
+      clientId,
+      serial: `T-${meterId.slice(0, 8)}`,
+      serviceAddress: '1 Test St',
+      registerDials: 5,
+    });
+    await db.insert(users).values({
+      id: readerId,
+      cognitoSub: `test:${readerId}`,
+      displayName: 'Test Reader',
+      role: 'reader',
+    });
+    await db.insert(routeRuns).values({
+      id: runId,
+      routeId,
+      clientId,
+      readerId,
+      runDate: '2026-07-18',
+      cycleId: '2026-07',
+      status: 'open',
+    });
+    await db
+      .insert(runStops)
+      .values({ id: stopId, runId, meterId, sequence: 0, status: 'pending' });
+    return { meterId, readerId, runId, stopId };
+  }
+
+  const read = (f: { meterId: string; readerId: string; stopId: string }, value: number, at: string) => ({
+    id: randomUUID(),
+    meterId: f.meterId,
+    readerId: f.readerId,
+    runStopId: f.stopId,
+    value,
+    capturedAt: at,
+    sourceType: 'manual' as const,
+    lat: 35.1,
+    lng: -120.1,
+  });
+
+  it('a corrected read becomes the stop read of record', async () => {
+    const f = await fixture();
+    const actor = { id: f.readerId, role: 'reader' as const };
+
+    await svc.ingest({ events: [read(f, 38000, '2026-07-18T10:00:00.000Z')] }, actor);
+    const corrected = read(f, 3800, '2026-07-18T10:05:00.000Z');
+    await svc.ingest({ events: [corrected] }, actor);
+
+    const [stop] = await db.select().from(runStops).where(eq(runStops.id, f.stopId));
+    expect(stop?.completedReadEventId).toBe(corrected.id);
+  });
+
+  it('an older read arriving late does not overwrite a newer one', async () => {
+    // Store-and-forward drains out of order; capture time is business truth.
+    const f = await fixture();
+    const actor = { id: f.readerId, role: 'reader' as const };
+
+    const newer = read(f, 1200, '2026-07-18T11:00:00.000Z');
+    await svc.ingest({ events: [newer] }, actor);
+    await svc.ingest({ events: [read(f, 1100, '2026-07-18T09:00:00.000Z')] }, actor);
+
+    const [stop] = await db.select().from(runStops).where(eq(runStops.id, f.stopId));
+    expect(stop?.completedReadEventId).toBe(newer.id);
+  });
+
+  it('reading a skipped stop completes it and clears the skip reason', async () => {
+    const f = await fixture();
+    const actor = { id: f.readerId, role: 'reader' as const };
+    const [reason] = await db.select().from(skipReasons).limit(1);
+    await db
+      .update(runStops)
+      .set({ status: 'skipped', skipReasonId: reason?.id ?? null })
+      .where(eq(runStops.id, f.stopId));
+
+    const later = read(f, 900, '2026-07-18T12:00:00.000Z');
+    await svc.ingest({ events: [later] }, actor);
+
+    const [stop] = await db.select().from(runStops).where(eq(runStops.id, f.stopId));
+    expect(stop?.status).toBe('read');
+    expect(stop?.completedReadEventId).toBe(later.id);
+    expect(stop?.skipReasonId).toBeNull();
+  });
+
+  it('closes the run once nothing is pending', async () => {
+    const f = await fixture();
+    const actor = { id: f.readerId, role: 'reader' as const };
+
+    await svc.ingest({ events: [read(f, 1000, '2026-07-18T10:00:00.000Z')] }, actor);
+
+    const [run] = await db.select().from(routeRuns).where(eq(routeRuns.id, f.runId));
+    // Left open, a finished run reports as aging the next morning.
+    expect(run?.status).toBe('closed');
   });
 });

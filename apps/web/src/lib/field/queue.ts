@@ -210,7 +210,15 @@ class FieldQueue {
             const json = await res.json();
             const status = json?.results?.[0]?.status ?? 'rejected';
             const landed = stateFromIngest(status);
-            await this.persist({ ...a, state: landed });
+            // Keep the server's reason. A rejected read ("value exceeds register
+            // capacity") otherwise left the reader with a bare "failed" count and
+            // nothing to act on — they walked away believing the stop was done.
+            const reason: string | undefined = json?.results?.[0]?.message;
+            await this.persist({
+              ...a,
+              state: landed,
+              error: landed === 'failed' ? (reason ?? 'the server rejected this read') : undefined,
+            });
 
             // Photo attaches after the read lands (H6, best-effort — the read is
             // never blocked by it). On success we drop the local data URL to free

@@ -1,0 +1,1 @@
+ALTER TABLE "clients" ADD COLUMN "timezone" text DEFAULT 'America/Los_Angeles' NOT NULL;

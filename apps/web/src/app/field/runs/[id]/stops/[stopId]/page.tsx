@@ -9,6 +9,12 @@ import type {
   RunStopView,
   TaxonomyResponse,
 } from '@routewrangler/contracts';
+import {
+  DEFAULT_VALIDATION_CONFIG,
+  EXCEPTION_META,
+  runValidation,
+  type ExceptionCode,
+} from '@routewrangler/contracts';
 import { fetchFieldMeterReads, fetchMe, fetchRun, fetchTaxonomy } from '@/lib/api';
 import { useFieldQueue } from '@/lib/field/useFieldQueue';
 import { RouteMapView } from '@/components/field/RouteMapView';
@@ -120,6 +126,40 @@ export default function CapturePage() {
       ignore = true;
     };
   }, [stop]);
+
+  /*
+   * The reader's own workflow: a normal read needs no photo, a deviating read
+   * must be photographed. Running the *server's* validation engine here — the
+   * same pure rules ingestion applies (@routewrangler/contracts) — means the app
+   * and the server can never disagree about which reads that covers.
+   *
+   * A reader standing at the meter can re-check a transposed digit in seconds.
+   * The same mistake caught later costs an exception, a supervisor's time and a
+   * second visit.
+   */
+  const anomalyCodes = ((): ExceptionCode[] => {
+    if (!stop || !meter || value === '') return [];
+    const n = Number(value);
+    if (!Number.isFinite(n)) return [];
+    const { exceptions } = runValidation({
+      value: n,
+      lat: gps.lat,
+      lng: gps.lng,
+      registerDials: stop.registerDials,
+      // The engine wants oldest-first; the field history arrives most-recent-first.
+      history: [...meter.reads]
+        .reverse()
+        .map((r) => ({ value: r.value, consumption: r.consumption })),
+      config: DEFAULT_VALIDATION_CONFIG,
+    });
+    // Only the *reading* is evidenced by a photo of the meter. A missing GPS fix
+    // or a duplicate stop is a different kind of problem and a photo says nothing
+    // about either, so neither should force one.
+    return exceptions.filter((c) => c !== 'location_absent' && c !== 'duplicate_mismatch');
+  })();
+
+  const photoRequired = anomalyCodes.length > 0;
+  const photoMissing = photoRequired && !photo;
 
   if (error) return <EmptyState title="Couldn't open this stop" hint={error} />;
   if (!stop || !me) return <Loading />;
@@ -338,21 +378,30 @@ export default function CapturePage() {
               {stop.status === 'read' ? 'Read captured' : 'Stop skipped'}
             </span>
           </div>
-          {stop.status === 'read' && (
+          {stop.status === 'read' ? (
             <p className="tabular" style={{ fontSize: 'var(--rw-text-2xl)', fontWeight: 600, margin: 0 }}>
               {stop.lastValue ?? '—'}
             </p>
+          ) : (
+            // The reader's own reason, so they can judge whether it still holds
+            // — "Stop skipped" alone left them guessing.
+            <p style={{ fontSize: 'var(--rw-text-base)', margin: 0 }}>
+              {(taxonomy?.skipReasons ?? []).find((r) => r.code === stop.skipReasonCode)?.label ??
+                stop.skipReasonCode ??
+                'Reason not recorded'}
+            </p>
           )}
           <p style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)', margin: 0 }}>
-            You&apos;ve already done this stop. Only capture again if the reading above is wrong —
-            it records a new read, it does not replace the old one.
+            {stop.status === 'read'
+              ? 'You’ve already done this stop. Only capture again if the reading above is wrong — it records a new read and becomes the reading of record.'
+              : 'You skipped this stop. If you can reach the meter now, capture the reading and it will complete the stop.'}
           </p>
           <button
             className="rw-button rw-button--ghost"
             style={{ width: '100%' }}
             onClick={() => setRecapture(true)}
           >
-            Re-capture reading
+            {stop.status === 'read' ? 'Re-capture reading' : 'Capture reading'}
           </button>
         </div>
       ) : (
@@ -372,7 +421,9 @@ export default function CapturePage() {
                 margin: 0,
               }}
             >
-              Re-capturing — this adds a second read for this stop.
+              {stop.status === 'skipped'
+                ? 'Capturing a reading here will complete this skipped stop.'
+                : 'Re-capturing — this reading replaces the one on record for this stop.'}
             </p>
           )}
           <label>
@@ -441,8 +492,30 @@ export default function CapturePage() {
             </button>
           </div>
 
-          <button className="rw-button" disabled={busy || value === ''} onClick={submitRead}>
-            {busy ? 'Saving…' : 'Capture read'}
+          {photoRequired && (
+            <p
+              style={{
+                margin: 0,
+                fontSize: 'var(--rw-text-sm)',
+                color: photoMissing ? 'var(--rw-warning)' : 'var(--rw-text-secondary)',
+                background: 'var(--rw-surface-2)',
+                border: '1px solid var(--rw-border)',
+                borderRadius: 'var(--rw-radius)',
+                padding: '0.6rem 0.75rem',
+              }}
+            >
+              {photoMissing ? 'Photo required — ' : 'Photo attached ✓ — '}
+              this reading is outside the normal range for this meter (
+              {anomalyCodes.map((c) => EXCEPTION_META[c].label.toLowerCase()).join(', ')}). Check the
+              dials, then photograph them.
+            </p>
+          )}
+          <button
+            className="rw-button"
+            disabled={busy || value === '' || photoMissing}
+            onClick={submitRead}
+          >
+            {busy ? 'Saving…' : photoMissing ? 'Attach a photo to continue' : 'Capture read'}
           </button>
           <button
             className="rw-button rw-button--ghost"
@@ -545,7 +618,7 @@ export default function CapturePage() {
                   <strong className="tabular">{r.value}</strong>
                   <span style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)' }}>
                     {new Date(r.capturedAt).toLocaleDateString()}
-                    {r.consumption != null && ` · +${r.consumption}`}
+                    {r.consumption != null && ` · ${r.consumption < 0 ? '' : '+'}${r.consumption}`}
                   </span>
                 </div>
                 {r.note && (

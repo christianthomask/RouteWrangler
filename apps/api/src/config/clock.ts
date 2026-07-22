@@ -8,20 +8,31 @@
  * created after that point is stamped with tomorrow's date. Every date-scoped
  * query must therefore go through here.
  *
- * The zone is a single operational setting (`APP_TIMEZONE`). Per-client zones
- * would be the fuller model — clients already carry a state — but every client
- * today is Pacific, and one wrong shared zone is a far smaller error than a
- * guaranteed daily inversion.
+ * Each client carries its own IANA zone (`clients.timezone`); `APP_TIMEZONE` is
+ * the default for new rows and the fallback where no client is in scope. A
+ * server-wide zone is not sufficient: "today" belongs to the utility whose work
+ * it is, so an operator spanning zones would otherwise mis-date half its runs.
  */
 
-/** `en-CA` is the locale whose short date format is exactly `YYYY-MM-DD`. */
-export function todayIn(timeZone: string, now: Date = new Date()): string {
+/**
+ * The calendar date an instant falls on, in the given zone. `en-CA` is the
+ * locale whose short date format is exactly `YYYY-MM-DD`.
+ *
+ * Use this for *any* instant rendered or compared as a date — not just "now".
+ * A read captured at 17:51 Pacific is `.toISOString().slice(0, 10)` = tomorrow,
+ * and shipping that to a billing file dates the work a day late.
+ */
+export function dateIn(timeZone: string, at: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(now);
+  }).format(at);
+}
+
+export function todayIn(timeZone: string, now: Date = new Date()): string {
+  return dateIn(timeZone, now);
 }
 
 /**

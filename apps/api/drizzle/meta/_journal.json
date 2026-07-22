@@ -57,6 +57,13 @@
       "when": 1784672845189,
       "tag": "0007_cool_lenny_balinger",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784682521389,
+      "tag": "0008_magenta_ogun",
+      "breakpoints": true
     }
   ]
 }

@@ -196,10 +196,38 @@ function draw(m: any, maplibre: any, stops: MapStop[], currentId: string | undef
     m.addLayer({ id: 'route-leg', type: 'line', source: 'route-leg', paint: { 'line-color': BRAND, 'line-width': 3, 'line-dasharray': [1, 2] } }),
   );
   setData('route-stops', points, () => {
-    // Circles only — no symbol/text layer, so we never depend on the style
-    // shipping a glyphs endpoint. Current (brand, large) and next (white, ringed)
-    // are already visually distinct; the surrounding UI names the next stop.
     m.addLayer({ id: 'route-stops', type: 'circle', source: 'route-stops', paint: { 'circle-radius': ['get', 'radius'], 'circle-color': ['get', 'color'], 'circle-stroke-color': ['get', 'stroke'], 'circle-stroke-width': 2 } });
+    /*
+     * Stop labels. This layer used to be omitted so the map never depended on
+     * the style shipping a glyphs endpoint — but the style now serves glyphs
+     * same-origin from R2, and without labels a reader sees identical dots and
+     * cannot tell reading order, which is the map's whole job. The SVG fallback
+     * has always numbered its stops; this brings the tiled map level with it.
+     *
+     * `text-allow-overlap` is deliberately false: on a dense urban route
+     * consecutive stops are metres apart, and MapLibre dropping a colliding
+     * label is better than an unreadable pile. The numbers reappear on zoom.
+     */
+    m.addLayer({
+      id: 'route-stop-labels',
+      type: 'symbol',
+      source: 'route-stops',
+      layout: {
+        'text-field': ['get', 'label'],
+        'text-font': ['Noto Sans Medium'],
+        'text-size': 11,
+        'text-offset': [0, -1.3],
+        'text-anchor': 'bottom',
+        'text-allow-overlap': false,
+        'text-ignore-placement': false,
+      },
+      paint: {
+        'text-color': '#0f172a',
+        // A halo keeps the number readable over roads, parks and buildings alike.
+        'text-halo-color': '#ffffff',
+        'text-halo-width': 1.5,
+      },
+    });
     if (onSelect) {
       m.on('click', 'route-stops', (e: { features?: Array<{ properties?: { id?: string } }> }) => {
         const id = e.features?.[0]?.properties?.id;

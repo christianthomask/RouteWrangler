@@ -8,11 +8,15 @@ import {
 import type { Database } from '../src/db/client';
 import { clients, meters, readEvents, routeRuns, routes, routeStops, runStops } from '../src/db/schema';
 import { clientId, hashSeed, meterId, readId, routeId, routeStopId, runId, runStopId } from './ids';
+import { dateIn } from '../src/config/clock';
 
 const CLIENTS = [
-  { name: 'San Luis Obispo', state: 'CA', code: 'SLO', lat: 35.2828, lng: -120.6596 },
-  { name: 'Morro Bay', state: 'CA', code: 'MB', lat: 35.3658, lng: -120.8499 },
-  { name: 'Bend', state: 'OR', code: 'BND', lat: 44.0582, lng: -121.3153 }, // out-of-state
+  // `timezone` drives each client's working day — run dates are calendar dates
+  // in the utility's own day, never the server's (see config/clock.ts).
+  { name: 'San Luis Obispo', state: 'CA', code: 'SLO', lat: 35.2828, lng: -120.6596, timezone: 'America/Los_Angeles' },
+  { name: 'Morro Bay', state: 'CA', code: 'MB', lat: 35.3658, lng: -120.8499, timezone: 'America/Los_Angeles' },
+  // Out-of-state, but still Pacific — Oregon shares the zone.
+  { name: 'Bend', state: 'OR', code: 'BND', lat: 44.0582, lng: -121.3153, timezone: 'America/Los_Angeles' },
 ];
 const ROUTES_PER_CLIENT = 2;
 const METERS_PER_ROUTE = 10;
@@ -107,7 +111,7 @@ export async function seedWorld(db: Database, readerId: string, endDate: Date): 
     const cId = clientId(c.name);
     await db
       .insert(clients)
-      .values({ id: cId, name: c.name, state: c.state })
+      .values({ id: cId, name: c.name, state: c.state, timezone: c.timezone })
       .onConflictDoNothing({ target: clients.id });
 
     for (let ri = 0; ri < ROUTES_PER_CLIENT; ri++) {
@@ -192,7 +196,10 @@ export async function seedWorld(db: Database, readerId: string, endDate: Date): 
   // Today's open demo run on the demo route, assigned to the reader.
   const demoRouteId = routeId(CLIENTS[0]!.name, routeName(0));
   const demoClientId = clientId(CLIENTS[0]!.name);
-  const runDate = endDate.toISOString().slice(0, 10);
+  // In the client's working day, not UTC: seeded after 5pm Pacific this stamped
+  // the demo run with tomorrow's date, so it appeared in neither "today's runs"
+  // nor aging — a completed run invisible on the dashboard.
+  const runDate = dateIn(CLIENTS[0]!.timezone, endDate);
   const cycleId = `${endDate.getUTCFullYear()}-${String(endDate.getUTCMonth() + 1).padStart(2, '0')}`;
   demoRunId = runId(demoRouteId, runDate);
 

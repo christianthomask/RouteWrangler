@@ -9,7 +9,6 @@ import {
   orderReread,
   overrideException,
   resolveException,
-  escalateException,
 } from '@/lib/api';
 import { SeverityChip, StatusBadge, Loading, EmptyState, num } from '@/components/ui';
 import { ConsumptionChart } from '@/components/charts/ConsumptionChart';
@@ -173,7 +172,7 @@ function ActionBar({ detail, onDone }: { detail: ExceptionDetail; onDone: (d: Ex
         </label>
       )}
       <label style={{ display: 'block' }}>
-        <span className="rw-label">Note {allow.some((a) => a !== 'reread') ? '(required to resolve/override/escalate)' : ''}</span>
+        <span className="rw-label">Note {allow.some((a) => a !== 'reread') ? '(required to resolve or override)' : ''}</span>
         <textarea className="rw-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why this decision…" />
       </label>
       {err && <p style={{ color: 'var(--rw-danger)', fontSize: 'var(--rw-text-sm)', margin: '8px 0 0' }}>{err}</p>}
@@ -206,12 +205,13 @@ function ActionBar({ detail, onDone }: { detail: ExceptionDetail; onDone: (d: Ex
             Accept / override
           </button>
         )}
-        {allow.includes('escalate') && (
-          <button className="rw-button rw-button--ghost" style={{ width: '100%', color: 'var(--rw-warning)' }} disabled={busy}
-            onClick={() => run(() => escalateException(detail.id, note), true)}>
-            Escalate
-          </button>
-        )}
+        {/*
+          * Escalate is deliberately not offered. There is no further tier beyond
+          * the supervisor today, so the action had no destination — an escalated
+          * item left the exception queue and joined nothing. The status, the
+          * endpoint and escalateException() all remain, so restoring the button
+          * is a one-line change once the escalation policy is settled.
+          */}
       </div>
     </section>
   );

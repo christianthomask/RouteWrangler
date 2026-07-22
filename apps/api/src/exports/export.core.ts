@@ -1,4 +1,5 @@
 import type { ExportCounts, ExportFormat, ExportHold, HoldReason } from '@routewrangler/contracts';
+import { dateIn } from '../config/clock';
 
 /**
  * Pure export core (BUILD_SPEC §7.4) — classification and rendering with no I/O,
@@ -36,6 +37,12 @@ export interface StopRow {
    * exception (C1) — that double-counted and mis-billed held meters.
    */
   exceptions: StopException[];
+  /**
+   * Whether the reader photographed the meter. A read outside the meter's normal
+   * range must be photographed in the field; the photo is the evidence for that
+   * read being charged differently, so billing needs to see both facts.
+   */
+  hasPhoto: boolean;
 }
 
 export interface BillableLine {
@@ -44,6 +51,14 @@ export interface BillableLine {
   readAt: string;
   readValue: number;
   consumption: number | null;
+  /**
+   * The read deviated from the meter's normal range and was reviewed — an
+   * exception was raised and then resolved or overridden, so it bills, but not
+   * as an ordinary read.
+   */
+  abnormal: boolean;
+  /** Whether the deviating read carries the photograph that evidences it. */
+  photoDocumented: boolean;
 }
 
 export interface Classification {
@@ -76,12 +91,18 @@ export function classify(rows: StopRow[]): Classification {
       holds.push(hold(r, 'blocking_exception', blocking.code));
       continue;
     }
+    // Reaching here with any exception at all means it was raised and then
+    // cleared by a supervisor, or never blocked billing — either way the read
+    // deviated and is not an ordinary one.
+    const abnormal = r.exceptions.length > 0;
     billable.push({
       meterSerial: r.meterSerial,
       serviceAddress: r.serviceAddress,
       readAt: r.readAt,
       readValue: r.readValue,
       consumption: r.consumption,
+      abnormal,
+      photoDocumented: abnormal && r.hasPhoto,
     });
   }
 
@@ -108,7 +129,17 @@ function hold(r: StopRow, reason: HoldReason, exceptionCode: string | null): Exp
   };
 }
 
-const CSV_HEADER = ['meter_serial', 'service_address', 'read_date', 'read_value', 'consumption'];
+const CSV_HEADER = [
+  'meter_serial',
+  'service_address',
+  'read_date',
+  'read_value',
+  'consumption',
+  // Billing charges a deviating read differently, and the photo is its evidence.
+  // An abnormal read with no photo is worth the client's attention.
+  'abnormal_read',
+  'photo_documented',
+];
 
 /** RFC-4180-ish CSV escaping: quote when the field has a comma, quote, or newline. */
 function csvCell(v: string | number | null): string {
@@ -117,15 +148,22 @@ function csvCell(v: string | number | null): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export function render(format: ExportFormat, lines: BillableLine[]): string {
+/**
+ * `timeZone` is the client's, and it is not optional: `readAt` is an instant, and
+ * slicing its UTC ISO string dated a 17:51 Pacific read as the following day —
+ * shipping tomorrow's date to billing for every read taken after 5pm.
+ */
+export function render(format: ExportFormat, lines: BillableLine[], timeZone: string): string {
   // csv is the only format today; the enum keeps the seam explicit for others.
   void format;
   const rows = lines.map((l) => [
     l.meterSerial,
     l.serviceAddress,
-    l.readAt.slice(0, 10),
+    dateIn(timeZone, new Date(l.readAt)),
     l.readValue,
     l.consumption ?? '',
+    l.abnormal ? 'yes' : 'no',
+    l.abnormal ? (l.photoDocumented ? 'yes' : 'no') : '',
   ]);
   return [CSV_HEADER, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }

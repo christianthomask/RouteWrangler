@@ -79,7 +79,8 @@ export class ExportsService {
     const format = (this.formatOf(client.exportProfile) ?? 'csv') as ExportFormat;
     const rows = await this.stopRows(clientId, cycleId);
     const { billable, counts } = classify(rows);
-    const body = render(format, billable);
+    // Dates in the client's own working day, not the server's (F1).
+    const body = render(format, billable, client.timezone);
     const filename = exportFilename(client.name, cycleId, format);
 
     // Pre-generate the new id so we can point any current export at it BEFORE
@@ -195,6 +196,7 @@ export class ExportsService {
         readValue: readEvents.value,
         consumption: readEvents.consumption,
         readAt: readEvents.capturedAt,
+        photoKey: readEvents.photoKey,
         skipReasonCode: skipReasons.code,
       })
       .from(runStops)
@@ -255,6 +257,9 @@ export class ExportsService {
         readValue: cert ? cert.value : b.readValue,
         consumption: cert ? cert.consumption : b.consumption,
         readAt: cert ? cert.readAt : b.readAt ? b.readAt.toISOString() : null,
+        // Follows the certified swap: the photo has to belong to the read
+        // actually being billed, not the one it replaced.
+        hasPhoto: Boolean(cert ? cert.photoKey : b.photoKey),
         skipReasonCode: b.skipReasonCode,
         exceptions: exs.map((e) => ({
           code: e.code,
@@ -267,20 +272,28 @@ export class ExportsService {
 
   private async readsById(
     ids: string[],
-  ): Promise<Map<string, { value: number; consumption: number | null; readAt: string }>> {
+  ): Promise<
+    Map<string, { value: number; consumption: number | null; readAt: string; photoKey: string | null }>
+  > {
     const rows = await this.db
       .select({
         id: readEvents.id,
         value: readEvents.value,
         consumption: readEvents.consumption,
         capturedAt: readEvents.capturedAt,
+        photoKey: readEvents.photoKey,
       })
       .from(readEvents)
       .where(inArray(readEvents.id, ids));
     return new Map(
       rows.map((r) => [
         r.id,
-        { value: r.value, consumption: r.consumption, readAt: r.capturedAt.toISOString() },
+        {
+          value: r.value,
+          consumption: r.consumption,
+          readAt: r.capturedAt.toISOString(),
+          photoKey: r.photoKey,
+        },
       ]),
     );
   }

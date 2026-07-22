@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_VALIDATION_CONFIG } from '@routewrangler/contracts';
 import { applyAnomaly, mulberry32, type AnomalyKind } from '@routewrangler/simulator';
-import { runValidation } from './engine';
-import type { PriorRead } from './types';
+import { runValidation } from '@routewrangler/contracts';
+import type { PriorRead } from '@routewrangler/contracts';
 
 /**
  * The BUILD_SPEC §7.6 / §10 acceptance: every validation rule has a seeded

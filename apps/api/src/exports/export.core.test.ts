@@ -10,6 +10,7 @@ const base: StopRow = {
   readAt: '2026-07-18T10:00:00.000Z',
   skipReasonCode: null,
   exceptions: [],
+  hasPhoto: false,
 };
 
 const exc = (code: string, status: string, blocksBilling: boolean): StopException => ({
@@ -157,20 +158,83 @@ describe('export classify (BUILD_SPEC §7.4)', () => {
   });
 });
 
+describe('export dates', () => {
+  it("dates a read in the client's working day, not UTC", () => {
+    // 2026-07-22T00:51Z is 2026-07-21 at 17:51 in Los Angeles. Slicing the ISO
+    // string shipped tomorrow's date to billing for every read taken after 5pm.
+    const csv = render(
+      'csv',
+      [
+        {
+          meterSerial: 'M1',
+          serviceAddress: '1 Main St',
+          readAt: '2026-07-22T00:51:00.000Z',
+          readValue: 100,
+          consumption: 10,
+          abnormal: false,
+          photoDocumented: false,
+        },
+      ],
+      'America/Los_Angeles',
+    );
+    expect(csv).toContain('2026-07-21');
+    expect(csv).not.toContain('2026-07-22');
+  });
+});
+
+describe('abnormal reads in the billable set', () => {
+  const cleared: StopException = {
+    code: 'high_read',
+    status: 'overridden',
+    blocksBilling: true,
+  };
+
+  it('marks a read that was flagged and then cleared as abnormal', () => {
+    // It bills — a supervisor cleared it — but it is not an ordinary read, and
+    // the reader's workflow charges it differently.
+    const { billable } = classify([{ ...base, exceptions: [cleared], hasPhoto: true }]);
+    expect(billable[0]).toMatchObject({ abnormal: true, photoDocumented: true });
+  });
+
+  it('reports an abnormal read that carries no photo, rather than hiding it', () => {
+    // The photo is the evidence for the different charge, so billing needs to
+    // see an abnormal read that arrived without one.
+    const { billable } = classify([{ ...base, exceptions: [cleared], hasPhoto: false }]);
+    expect(billable[0]).toMatchObject({ abnormal: true, photoDocumented: false });
+  });
+
+  it('leaves an ordinary read unflagged even when it has a photo', () => {
+    // Readers may photograph anything; a photo alone does not make a read
+    // abnormal, so it must not change how the read is charged.
+    const { billable } = classify([{ ...base, exceptions: [], hasPhoto: true }]);
+    expect(billable[0]).toMatchObject({ abnormal: false, photoDocumented: false });
+  });
+});
+
 describe('export render', () => {
   it('renders a header + CRLF rows and escapes commas', () => {
-    const csv = render('csv', [
+    const csv = render(
+      'csv',
+      [
       {
         meterSerial: 'M1',
         serviceAddress: '1 Main St, Apt 2',
         readAt: '2026-07-18T10:00:00.000Z',
         readValue: 1234,
         consumption: 42,
+        abnormal: false,
+        photoDocumented: false,
       },
-    ]);
+    ],
+      'America/Los_Angeles',
+    );
     const lines = csv.trimEnd().split('\r\n');
-    expect(lines[0]).toBe('meter_serial,service_address,read_date,read_value,consumption');
-    expect(lines[1]).toBe('M1,"1 Main St, Apt 2",2026-07-18,1234,42');
+    expect(lines[0]).toBe(
+      'meter_serial,service_address,read_date,read_value,consumption,abnormal_read,photo_documented',
+    );
+    // An ordinary read: not abnormal, so the photo column stays blank rather
+    // than asserting "no photo" about a read that never needed one.
+    expect(lines[1]).toBe('M1,"1 Main St, Apt 2",2026-07-18,1234,42,no,');
   });
 
   it('filenames are slugged', () => {

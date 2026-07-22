@@ -1,4 +1,4 @@
-import { blocksBilling, type ExceptionCode } from '@routewrangler/contracts';
+import { blocksBilling, type ExceptionCode } from '../validation';
 import type { ValidationInput, ValidationResult } from './types';
 import { derive, effectiveConsumption } from './baseline';
 import { CONSUMPTION_RULES, INDEPENDENT_RULES } from './rules';

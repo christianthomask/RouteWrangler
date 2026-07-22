@@ -27,13 +27,14 @@ export class DashboardService {
   ) {}
 
   async get(): Promise<Dashboard> {
-    const today = todayIn(this.env.APP_TIMEZONE);
-
     const runRows = await this.db
       .select({
         runId: routeRuns.id,
         routeName: routes.name,
         clientName: clients.name,
+        // Each run is dated in its own client's working day, so "today" is
+        // resolved per row rather than once for the whole server.
+        clientTimezone: clients.timezone,
         readerName: users.displayName,
         runDate: routeRuns.runDate,
         status: routeRuns.status,
@@ -75,9 +76,19 @@ export class DashboardService {
       };
     };
 
-    const runs = runRows.filter((r) => r.runDate === today).map(toProgress);
+    const todayFor = (tz: string) => todayIn(tz || this.env.APP_TIMEZONE);
+    const runs = runRows.filter((r) => r.runDate === todayFor(r.clientTimezone)).map(toProgress);
+    // "Aging" means unfinished and overdue. A run with nothing pending is
+    // finished even if its status was never closed — belt and braces for rows
+    // that predate automatic close-out, so completed work can never present
+    // itself as overdue.
     const agingRuns = runRows
-      .filter((r) => r.status === 'open' && r.runDate < today)
+      .filter(
+        (r) =>
+          r.status === 'open' &&
+          r.runDate < todayFor(r.clientTimezone) &&
+          (countsByRun.get(r.runId)?.pending ?? 0) > 0,
+      )
       .map(toProgress);
 
     // Counts every *non-terminal* exception, not just `status = 'open'`. A

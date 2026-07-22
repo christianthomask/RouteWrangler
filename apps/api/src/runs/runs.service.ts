@@ -130,9 +130,12 @@ export class RunsService {
         registerDials: meters.registerDials,
         lat: meters.lat,
         lng: meters.lng,
+        skipReasonCode: skipReasons.code,
       })
       .from(runStops)
       .innerJoin(meters, eq(runStops.meterId, meters.id))
+      // left: only a skipped stop has a reason.
+      .leftJoin(skipReasons, eq(runStops.skipReasonId, skipReasons.id))
       .where(eq(runStops.runId, runId))
       .orderBy(asc(runStops.sequence));
 
@@ -151,6 +154,8 @@ export class RunsService {
         lat: s.lat,
         lng: s.lng,
         lastValue: lastValues.get(s.meterId) ?? null,
+        // The column is plain text; the taxonomy constrains the values.
+        skipReasonCode: s.skipReasonCode as SkipReasonCode | null,
       })),
     };
   }
@@ -162,7 +167,15 @@ export class RunsService {
     const [route] = await this.db.select().from(routes).where(eq(routes.id, req.routeId)).limit(1);
     if (!route) throw new NotFoundException('route not found');
 
-    const runDate = req.runDate ?? todayIn(this.env.APP_TIMEZONE);
+    // Dated in the client's working day, not the server's. Assigning a route
+    // late in the afternoon must not stamp it with tomorrow's date and make it
+    // invisible to "today" from the moment it exists.
+    const [client] = await this.db
+      .select({ timezone: clients.timezone })
+      .from(clients)
+      .where(eq(clients.id, route.clientId))
+      .limit(1);
+    const runDate = req.runDate ?? todayIn(client?.timezone || this.env.APP_TIMEZONE);
     const cycleId = req.cycleId ?? currentCycleId(new Date(runDate));
     const runId = randomUUID();
 
@@ -340,8 +353,33 @@ export class RunsService {
         entityId: stopId,
         meta: { runId, meterId: skipped[0].meterId, skipReasonCode: code },
       });
+      // A run can be finished by skipping its last stop, not only by reading it.
+      await this.closeIfComplete(runId);
     }
     return this.detail(runId);
+  }
+
+  /**
+   * Closes a run once nothing is pending. Left open, a finished run keeps
+   * reporting as in-flight and starts showing as *aging* the next day, since
+   * aging is `open AND runDate < today`.
+   */
+  private async closeIfComplete(runId: string): Promise<void> {
+    await this.db
+      .update(routeRuns)
+      .set({ status: 'closed', updatedAt: new Date() })
+      .where(
+        and(
+          eq(routeRuns.id, runId),
+          eq(routeRuns.status, 'open'),
+          notExists(
+            this.db
+              .select({ one: sql`1` })
+              .from(runStops)
+              .where(and(eq(runStops.runId, runId), eq(runStops.status, 'pending'))),
+          ),
+        ),
+      );
   }
 
   /** Latest read value per meter (one query, distinct-on). */

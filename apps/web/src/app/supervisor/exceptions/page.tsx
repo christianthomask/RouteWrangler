@@ -10,6 +10,8 @@ import type {
 import { fetchExceptions, fetchTaxonomy } from '@/lib/api';
 import { SeverityChip, StatusBadge, EmptyState, Loading, relativeTime, num } from '@/components/ui';
 
+// `escalated` stays filterable even though the action is no longer offered:
+// removing it would make any historical escalated rows unreachable in the UI.
 const STATUSES = ['open', 'reread_ordered', 'reread_received', 'resolved', 'overridden', 'escalated'] as const;
 
 export default function ExceptionsPage() {

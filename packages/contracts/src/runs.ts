@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SkipReasonCodeSchema } from './validation';
 
 /**
  * Minimal run views for Sprint 1 — enough for the simulator's playback client to
@@ -23,6 +24,12 @@ export const RunStopViewSchema = z.object({
   lng: z.number().nullable(),
   /** The meter's most recent read value, if any (drives realistic simulation). */
   lastValue: z.number().nullable(),
+  /**
+   * Why the stop was skipped, when it was. A reader revisiting a skipped stop
+   * needs to see the reason they gave — otherwise the screen says only "Stop
+   * skipped" and they have no idea whether it still applies.
+   */
+  skipReasonCode: SkipReasonCodeSchema.nullable(),
 });
 export type RunStopView = z.infer<typeof RunStopViewSchema>;
 

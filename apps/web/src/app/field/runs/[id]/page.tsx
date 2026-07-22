@@ -89,6 +89,42 @@ export default function FieldRunPage() {
         </div>
       </div>
 
+      {/*
+        * Rejected captures, stated plainly. A read the server refuses is not on
+        * record, but submitting navigated straight back here and showed only a
+        * transient "1 failed" count — so a reader could finish a route believing
+        * stops were done that hold no reading at all.
+        */}
+      {[...actionByStop.entries()]
+        .filter(([, a]) => a.state === 'failed')
+        .map(([stopId, a]) => {
+          const stop = run.stops.find((x) => x.id === stopId);
+          return (
+            <button
+              key={stopId}
+              className="rw-card"
+              onClick={() => router.push(`/field/runs/${id}/stops/${stopId}`)}
+              style={{
+                textAlign: 'left',
+                width: '100%',
+                border: '1px solid var(--rw-danger)',
+                background: 'var(--rw-danger-bg)',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <strong style={{ color: 'var(--rw-danger)' }}>
+                {stop?.meterSerial ?? 'A stop'} — not recorded
+              </strong>
+              <span style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-secondary)' }}>
+                {a.error ?? 'The server rejected this reading.'} Tap to capture it again.
+              </span>
+            </button>
+          );
+        })}
+
       <div className="rw-card">
         <RouteMapView
           stops={mapStops}

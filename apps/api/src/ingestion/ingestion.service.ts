@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, asc, eq, gte, lt, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lt, ne, notInArray, sql } from 'drizzle-orm';
 import {
   DEFAULT_VALIDATION_CONFIG,
   registerMax,
@@ -13,8 +13,8 @@ import { DB } from '../db/db.module';
 import type { Database } from '../db/client';
 import { exceptions, meters, readEvents, rereadTasks, routeRuns, runStops } from '../db/schema';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
-import { runValidation } from '../validation/engine';
-import type { PriorRead } from '../validation/types';
+import { runValidation } from '@routewrangler/contracts';
+import type { PriorRead } from '@routewrangler/contracts';
 import { MAX_REREADS, TERMINAL_STATUSES } from '../exceptions/lifecycle';
 
 /** The authenticated caller — the reader identity is derived from this, never
@@ -94,7 +94,9 @@ export class IngestionService {
     // Duplicate-stop coverage: a read landing on an already-completed stop still
     // persists; disagreeing values open a duplicate_mismatch (BUILD_SPEC §7.1).
     let duplicate: { completedValue: number } | null = null;
-    let stopStatus: string | null = null;
+    // The stop's current read of record, if any — decides below whether this
+    // reading supersedes it.
+    let incumbent: { id: string; capturedAt: Date } | null = null;
     if (ev.runStopId) {
       const [stop] = await this.db
         .select({
@@ -112,18 +114,20 @@ export class IngestionService {
       if (actor.role === 'reader' && stop.runReaderId !== actor.id) {
         return { id: ev.id, status: 'rejected', message: 'run stop not assigned to you' };
       }
-      stopStatus = stop.status;
-      if (stop.status === 'read' && stop.completedReadEventId) {
+      if (stop.completedReadEventId) {
         const [completed] = await this.db
-          .select({ value: readEvents.value })
+          .select({ value: readEvents.value, capturedAt: readEvents.capturedAt })
           .from(readEvents)
           .where(eq(readEvents.id, stop.completedReadEventId))
           .limit(1);
-        if (completed) duplicate = { completedValue: completed.value };
+        if (completed) {
+          incumbent = { id: stop.completedReadEventId, capturedAt: completed.capturedAt };
+          if (stop.status === 'read') duplicate = { completedValue: completed.value };
+        }
       }
     }
 
-    const history = await this.loadHistory(ev.meterId, new Date(ev.capturedAt));
+    const history = await this.loadHistory(ev.meterId, new Date(ev.capturedAt), ev.runStopId);
 
     const result = runValidation({
       value: ev.value,
@@ -179,12 +183,72 @@ export class IngestionService {
         });
       }
 
-      // First read completes a pending stop; a completed stop is left as-is.
-      if (ev.runStopId && stopStatus === 'pending') {
+      /*
+       * The stop's read of record is the latest reading taken at it.
+       *
+       * This used to fire only for a `pending` stop, which orphaned two
+       * legitimate cases the field app actively invites: correcting a
+       * fat-fingered value (the corrected read was stored but never became the
+       * stop's read, so the wrong number billed), and reading a stop that was
+       * skipped earlier and later became accessible (a valid reading that would
+       * never bill at all). Idempotency is keyed on the client-generated event
+       * id (ADR-008) and duplicates are rejected above, so anything reaching
+       * here is a genuinely new reading.
+       *
+       * Compared on capture time, not arrival: a store-and-forward drain
+       * replays out of order, and an older reading must not overwrite a newer
+       * one. The WHERE re-asserts the incumbent we read, so two concurrent
+       * captures cannot both win.
+       */
+      const supersedes = !incumbent || new Date(ev.capturedAt) >= incumbent.capturedAt;
+      if (ev.runStopId && supersedes) {
         await tx
           .update(runStops)
-          .set({ status: 'read', completedReadEventId: ev.id, updatedAt: new Date() })
-          .where(and(eq(runStops.id, ev.runStopId), eq(runStops.status, 'pending')));
+          .set({
+            status: 'read',
+            completedReadEventId: ev.id,
+            // Regaining access supersedes the skip; the reason no longer applies.
+            skipReasonId: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(runStops.id, ev.runStopId),
+              incumbent
+                ? eq(runStops.completedReadEventId, incumbent.id)
+                : isNull(runStops.completedReadEventId),
+            ),
+          );
+      }
+
+      /*
+       * A run with nothing left pending is finished, so close it here rather
+       * than waiting for someone to notice. Left open, a fully-worked run keeps
+       * showing as in-flight and — because aging is `open AND runDate < today` —
+       * every completed run would start reporting itself as overdue the next
+       * morning, re-populating the very metric the timezone fix corrected.
+       *
+       * Guarded on there being no pending stop left, evaluated inside the same
+       * transaction as the stop update above, so a concurrent read on the last
+       * two stops cannot both see one remaining.
+       */
+      if (ev.runStopId) {
+        await tx
+          .update(routeRuns)
+          .set({ status: 'closed', updatedAt: new Date() })
+          .where(
+            and(
+              eq(routeRuns.status, 'open'),
+              eq(
+                routeRuns.id,
+                sql`(SELECT run_id FROM run_stops WHERE id = ${ev.runStopId})`,
+              ),
+              sql`NOT EXISTS (
+                SELECT 1 FROM run_stops rs
+                WHERE rs.run_id = ${routeRuns.id} AND rs.status = 'pending'
+              )`,
+            ),
+          );
       }
 
       // A reread answering an exception advances it to reread_received (W4).
@@ -240,7 +304,11 @@ export class IngestionService {
    * out-of-order store-and-forward sync compare a read against a later capture
    * and fabricate a false negative_consumption; capture time is business truth.
    */
-  private async loadHistory(meterId: string, capturedAt: Date): Promise<PriorRead[]> {
+  private async loadHistory(
+    meterId: string,
+    capturedAt: Date,
+    excludeRunStopId?: string | null,
+  ): Promise<PriorRead[]> {
     const cutoff = new Date(capturedAt);
     cutoff.setMonth(cutoff.getMonth() - this.config.baselineMonths);
     const rows = await this.db
@@ -251,6 +319,15 @@ export class IngestionService {
           eq(readEvents.meterId, meterId),
           gte(readEvents.capturedAt, cutoff),
           lt(readEvents.capturedAt, capturedAt),
+          /*
+           * Earlier reads of the SAME stop are excluded from the baseline.
+           * A correction or a re-capture is another reading of one visit, not a
+           * month's consumption: measured against its own predecessor it
+           * differences to ~0, which made a re-read of a flagged meter look
+           * clean and billable, and made a corrected value nonsense. The true
+           * comparison is the previous cycle's read.
+           */
+          excludeRunStopId ? ne(readEvents.runStopId, excludeRunStopId) : undefined,
         ),
       )
       .orderBy(asc(readEvents.capturedAt));

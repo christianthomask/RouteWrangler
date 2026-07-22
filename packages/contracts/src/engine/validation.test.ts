@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_VALIDATION_CONFIG, type ValidationConfig } from '@routewrangler/contracts';
+import { DEFAULT_VALIDATION_CONFIG, type ValidationConfig } from '../validation';
 import { runValidation } from './engine';
 import type { PriorRead, ValidationInput } from './types';
 

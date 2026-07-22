@@ -1,4 +1,4 @@
-import { registerMax } from '@routewrangler/contracts';
+import { registerMax } from '../validation';
 import type { Derived, ValidationInput } from './types';
 
 /**

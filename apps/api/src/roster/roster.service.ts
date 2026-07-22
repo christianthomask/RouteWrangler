@@ -7,7 +7,7 @@ import type { Env } from '../config/env';
 import { todayIn } from '../config/clock';
 import { rateOf } from '../exceptions/lifecycle';
 import type { Database } from '../db/client';
-import { exceptions, readEvents, routeRuns, runStops, users } from '../db/schema';
+import { clients, exceptions, readEvents, routeRuns, runStops, users } from '../db/schema';
 
 /** Roster — readers as entities (BUILD_SPEC §7.3). */
 @Injectable()
@@ -18,7 +18,6 @@ export class RosterService {
   ) {}
 
   async list(): Promise<RosterReader[]> {
-    const today = todayIn(this.env.APP_TIMEZONE);
     const readers = await this.db
       .select({ id: users.id, name: users.displayName })
       .from(users)
@@ -50,10 +49,21 @@ export class RosterService {
 
     const out: RosterReader[] = [];
     for (const r of readers) {
-      const todayRuns = await this.db
-        .select({ id: routeRuns.id, status: routeRuns.status })
+      // "Today" belongs to the client whose work it is, so each run is judged
+      // against its own client's zone rather than one server-wide date.
+      const runRows = await this.db
+        .select({
+          id: routeRuns.id,
+          status: routeRuns.status,
+          runDate: routeRuns.runDate,
+          timezone: clients.timezone,
+        })
         .from(routeRuns)
-        .where(and(eq(routeRuns.readerId, r.id), eq(routeRuns.runDate, today)));
+        .innerJoin(clients, eq(routeRuns.clientId, clients.id))
+        .where(eq(routeRuns.readerId, r.id));
+      const todayRuns = runRows.filter(
+        (x) => x.runDate === todayIn(x.timezone || this.env.APP_TIMEZONE),
+      );
 
       let read = 0;
       let total = 0;
