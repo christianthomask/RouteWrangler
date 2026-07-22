@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import type {
   FieldMeterReadsResponse,
   MeResponse,
@@ -13,7 +13,9 @@ import {
   DEFAULT_VALIDATION_CONFIG,
   EXCEPTION_META,
   runValidation,
+  skipRequiresPhoto,
   type ExceptionCode,
+  type SkipReasonCode,
 } from '@routewrangler/contracts';
 import { fetchFieldMeterReads, fetchMe, fetchRun, fetchTaxonomy } from '@/lib/api';
 import { useFieldQueue } from '@/lib/field/useFieldQueue';
@@ -59,6 +61,49 @@ export default function CapturePage() {
    * deliberate.
    */
   const [recapture, setRecapture] = useState(false);
+  const [skipReason, setSkipReason] = useState<SkipReasonCode | null>(null);
+  const [skipPhoto, setSkipPhoto] = useState<string | null>(null);
+  const skipFileRef = useRef<HTMLInputElement>(null);
+  /**
+   * Set when the reader arrived from a reread task. Carried onto the submission
+   * so ingestion advances the exception to `reread_received` and closes the
+   * task — without it the reread landed as an ordinary read and the loop stayed
+   * open forever.
+   */
+  const rereadExceptionId = useSearchParams().get('reread');
+
+  /*
+   * A half-typed reading survives leaving the screen. The page promises
+   * "saved to your device immediately", but that only held after submit — on a
+   * phone any interruption (a call, the screen locking, tapping back to check
+   * the route) silently discarded the value and the note.
+   *
+   * localStorage rather than the offline queue on purpose: this is an unsubmitted
+   * draft, not a capture. It must never sync, and it is cleared on submit.
+   */
+  const draftKey = `rw.draft.${stopId}`;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = window.localStorage.getItem(draftKey);
+    if (!raw) return;
+    try {
+      const d = JSON.parse(raw) as { value?: string; note?: string };
+      if (d.value) setValue(d.value);
+      if (d.note) setNote(d.note);
+    } catch {
+      window.localStorage.removeItem(draftKey);
+    }
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (value === '' && note === '') {
+      window.localStorage.removeItem(draftKey);
+      return;
+    }
+    window.localStorage.setItem(draftKey, JSON.stringify({ value, note }));
+  }, [draftKey, value, note]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const stop = useMemo(() => run?.stops.find((x) => x.id === stopId) ?? null, [run, stopId]);
@@ -181,8 +226,12 @@ export default function CapturePage() {
         lat: gps.lat,
         lng: gps.lng,
         note: note.trim() || null,
+        exceptionId: rereadExceptionId,
         photoDataUrl: photo,
       });
+      // The capture is queued and owns the data now; the draft would otherwise
+      // repopulate the form on a revisit.
+      window.localStorage.removeItem(draftKey);
       router.push(`/field/runs/${id}`);
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : "Couldn't save on this device — try again.");
@@ -190,17 +239,25 @@ export default function CapturePage() {
     }
   }
 
-  async function submitSkip(code: string) {
+  async function submitSkip(code: string, evidence: string | null) {
     if (!stop) return;
     setBusy(true);
     setSubmitError(null);
     try {
-      await enqueueSkip({ runId: id, stopId: stop.id, skipReasonCode: code });
+      await enqueueSkip({ runId: id, stopId: stop.id, skipReasonCode: code, photoDataUrl: evidence });
       router.push(`/field/runs/${id}`);
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : "Couldn't save on this device — try again.");
       setBusy(false);
     }
+  }
+
+  function onSkipPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setSkipPhoto(typeof reader.result === 'string' ? reader.result : null);
+    reader.readAsDataURL(file);
   }
 
   function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
@@ -344,26 +401,71 @@ export default function CapturePage() {
           >
             Skip reason
           </h2>
-          {(taxonomy?.skipReasons ?? []).map((r) => (
-            <button
-              key={r.code}
-              className="rw-button rw-button--ghost"
-              style={{ width: '100%' }}
-              disabled={busy}
-              onClick={() => submitSkip(r.code)}
-            >
-              {r.label}
-            </button>
-          ))}
+          {!skipReason ? (
+            (taxonomy?.skipReasons ?? []).map((r) => (
+              <button
+                key={r.code}
+                className="rw-button rw-button--ghost"
+                style={{ width: '100%' }}
+                disabled={busy}
+                onClick={() => {
+                  // Only a reason that can be safely photographed asks for one.
+                  if (skipRequiresPhoto(r.code)) setSkipReason(r.code);
+                  else submitSkip(r.code, null);
+                }}
+              >
+                {r.label}
+              </button>
+            ))
+          ) : (
+            <>
+              <p style={{ margin: 0, fontSize: 'var(--rw-text-base)', fontWeight: 600 }}>
+                {(taxonomy?.skipReasons ?? []).find((r) => r.code === skipReason)?.label ?? skipReason}
+              </p>
+              <p style={{ margin: 0, fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-secondary)' }}>
+                {/* A skip takes this meter out of the billing cycle, so it needs
+                    evidence — the locked gate, the obstruction, the empty pit. */}
+                Photograph what stopped you. A supervisor reviews every skip, and the
+                photo is what they look at.
+              </p>
+              <input
+                ref={skipFileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={onSkipPhoto}
+                style={{ display: 'none' }}
+              />
+              <button
+                className="rw-button rw-button--ghost"
+                style={{ width: '100%' }}
+                onClick={() => skipFileRef.current?.click()}
+              >
+                {skipPhoto ? 'Photo attached ✓ — retake' : 'Take photo'}
+              </button>
+              <button
+                className="rw-button"
+                style={{ width: '100%' }}
+                disabled={busy || !skipPhoto}
+                onClick={() => submitSkip(skipReason, skipPhoto)}
+              >
+                {busy ? 'Saving…' : skipPhoto ? 'Confirm skip' : 'Photo required to skip'}
+              </button>
+            </>
+          )}
           <button
             className="rw-button rw-button--ghost"
             style={{ width: '100%', color: 'var(--rw-text-muted)' }}
-            onClick={() => setSkipping(false)}
+            onClick={() => {
+              setSkipping(false);
+              setSkipReason(null);
+              setSkipPhoto(null);
+            }}
           >
             Cancel
           </button>
         </div>
-      ) : stop.status !== 'pending' && !recapture ? (
+      ) : stop.status !== 'pending' && !recapture && !rereadExceptionId ? (
         <div
           className="rw-card"
           style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-3)' }}

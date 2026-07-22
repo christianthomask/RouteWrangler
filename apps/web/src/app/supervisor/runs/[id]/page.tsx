@@ -86,10 +86,15 @@ export default function RunDetailPage() {
     setBusy(true);
     setActionError(null);
     try {
+      const wasAssigned = Boolean(run?.readerId);
       setRun(await reassignRun(id, reassignTo));
-      setMsg(`Reassigned to ${readerName(reassignTo)}.`);
+      setMsg(`${wasAssigned ? 'Reassigned' : 'Assigned'} to ${readerName(reassignTo)}.`);
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'reassign failed');
+      // Refetch on failure: the rejection is usually *because* the run moved
+      // underneath this page, so the stale view is the least useful thing to
+      // leave on screen.
+      load();
     } finally {
       setBusy(false);
     }
@@ -104,6 +109,7 @@ export default function RunDetailPage() {
       setMsg('Run released — it is now unassigned.');
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'release failed');
+      load();
     } finally {
       setBusy(false);
     }
@@ -122,6 +128,8 @@ export default function RunDetailPage() {
       setActionError(
         e instanceof Error ? e.message : 'split failed — stops must be a contiguous pending range',
       );
+      load();
+      setSelected(new Set());
     } finally {
       setBusy(false);
     }

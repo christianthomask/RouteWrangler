@@ -222,6 +222,28 @@ export class IngestionService {
       }
 
       /*
+       * Reading a stop that was skipped answers the skip. Leaving its
+       * `skipped_unresolved` open would keep a resolved situation sitting in the
+       * supervisor's queue, and keep the meter held out of billing even though
+       * a reading now exists.
+       */
+      if (ev.runStopId && supersedes) {
+        await tx
+          .update(exceptions)
+          .set({
+            status: 'resolved',
+            resolutionNote: 'Stop was re-read after being skipped.',
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(exceptions.runStopId, ev.runStopId),
+              notInArray(exceptions.status, TERMINAL_STATUSES),
+            ),
+          );
+      }
+
+      /*
        * A run with nothing left pending is finished, so close it here rather
        * than waiting for someone to notice. Left open, a fully-worked run keeps
        * showing as in-flight and — because aging is `open AND runDate < today` —

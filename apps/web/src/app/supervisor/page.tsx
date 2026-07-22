@@ -70,7 +70,11 @@ export default function DashboardPage() {
                     <span>{r.clientName}</span>
                     <span>{r.readerName ?? 'Unassigned'}</span>
                     <span style={{ marginLeft: 'auto' }} className="tabular">
-                      {r.readStops}/{r.totalStops} read{r.pendingStops ? ` · ${r.pendingStops} pending` : ''}
+                      {/* Skipped stops count toward completion, so omitting them
+                          made a finished run read "100% · 4/7 read". */}
+                      {r.readStops}/{r.totalStops} read
+                      {r.skippedStops ? ` · ${r.skippedStops} skipped` : ''}
+                      {r.pendingStops ? ` · ${r.pendingStops} pending` : ''}
                     </span>
                   </div>
                   <div style={{ height: 6, background: 'var(--rw-surface-3)', borderRadius: 999, marginTop: 2 }}>

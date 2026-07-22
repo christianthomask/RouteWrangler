@@ -135,6 +135,23 @@ export class DashboardService {
       .groupBy(readEvents.readerId);
     const exMap = new Map(exByReader.map((r) => [r.readerId, r]));
 
+    /*
+     * Skip exceptions are attributed through the *run*, not a read — a skip has
+     * no reading to hang off. Counted into the reader's exception total (a
+     * reader who skips heavily should show up), but never into `flagged`, which
+     * is the share of their *reads* that tripped a rule and must stay bounded.
+     */
+    const skipExByReader = await this.db
+      .select({ readerId: routeRuns.readerId, n: count() })
+      .from(exceptions)
+      .innerJoin(runStops, eq(exceptions.runStopId, runStops.id))
+      .innerJoin(routeRuns, eq(runStops.runId, routeRuns.id))
+      .groupBy(routeRuns.readerId);
+    const skipExMap = new Map(
+      skipExByReader.filter((r) => r.readerId).map((r) => [r.readerId as string, r.n]),
+    );
+
+
     const readers = readerRows.map((r) => {
       const reads = readsMap.get(r.id) ?? 0;
       const ex = exMap.get(r.id);
@@ -142,7 +159,7 @@ export class DashboardService {
         readerId: r.id,
         readerName: r.name,
         reads,
-        exceptions: ex?.n ?? 0,
+        exceptions: (ex?.n ?? 0) + (skipExMap.get(r.id) ?? 0),
         exceptionRate: rateOf(ex?.flagged ?? 0, reads),
       };
     });

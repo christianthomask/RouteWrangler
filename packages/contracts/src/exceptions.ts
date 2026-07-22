@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ExceptionCodeSchema, SeverityCodeSchema } from './validation';
+import { ExceptionCodeSchema, SeverityCodeSchema, SkipReasonCodeSchema } from './validation';
 import { SourceTypeSchema } from './ingestion';
 
 /**
@@ -29,8 +29,13 @@ export const ExceptionListItemSchema = z.object({
   meterId: z.string().uuid(),
   meterSerial: z.string(),
   serviceAddress: z.string(),
-  value: z.number(),
+  /**
+   * Null for a skip: there is no reading. `skipReasonCode` says why instead —
+   * exactly one of the two is meaningful on any given row.
+   */
+  value: z.number().nullable(),
   consumption: z.number().nullable(),
+  skipReasonCode: SkipReasonCodeSchema.nullable(),
   rereadCount: z.number().int(),
   createdAt: z.string(),
 });
@@ -112,8 +117,20 @@ export const ExceptionDetailSchema = z.object({
     accessNotes: z.string().nullable(),
   }),
 
-  /** The flagged read. */
-  flaggedRead: ReadEventViewSchema,
+  /** The flagged read — null when the exception is a skip, which has no reading. */
+  flaggedRead: ReadEventViewSchema.nullable(),
+  /** Present only for a skip: the reason given and the photograph evidencing it. */
+  skip: z
+    .object({
+      runId: z.string().uuid(),
+      runStopId: z.string().uuid(),
+      reasonCode: SkipReasonCodeSchema.nullable(),
+      reasonLabel: z.string().nullable(),
+      photoUrl: z.string().nullable(),
+      readerName: z.string().nullable(),
+      skippedAt: z.string(),
+    })
+    .nullable(),
   /** Reread events linked to this exception (for side-by-side). */
   rereads: z.array(ReadEventViewSchema),
   /** The meter's trailing consumption series, flagged point marked. */

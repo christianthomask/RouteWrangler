@@ -64,6 +64,13 @@
       "when": 1784682521389,
       "tag": "0008_magenta_ogun",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784689785896,
+      "tag": "0009_mighty_killmonger",
+      "breakpoints": true
     }
   ]
 }

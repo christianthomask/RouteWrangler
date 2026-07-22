@@ -23,12 +23,35 @@ export default function ExportsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     fetchClients()
-      .then((r) => {
+      .then(async (r) => {
+        if (!active) return;
         setClients(r.clients);
-        if (r.clients[0]) setClientId(r.clients[0].id);
+        /*
+         * Land on a client that actually has something to export. Defaulting to
+         * the first alphabetically opened the page on "No cycles / No runs for
+         * this client yet", which reads as a broken screen rather than an empty
+         * client. Probing is bounded and only runs once, on mount.
+         */
+        for (const c of r.clients.slice(0, 8)) {
+          try {
+            const { cycles } = await fetchExportCycles(c.id);
+            if (!active) return;
+            if (cycles.length) {
+              setClientId(c.id);
+              return;
+            }
+          } catch {
+            /* try the next client */
+          }
+        }
+        if (active && r.clients[0]) setClientId(r.clients[0].id);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'failed'));
+    return () => {
+      active = false;
+    };
   }, []);
 
   // When the client changes, load its cycles + export history.
@@ -113,6 +136,9 @@ export default function ExportsPage() {
               <Stat label="Billable" value={c!.billable} color="var(--rw-sync-synced)" />
               <Stat label="Held" value={c!.held} color="var(--rw-warning)" />
               <Stat label="Missing" value={c!.missing} color="var(--rw-text-muted)" />
+              {/* Skipped is counted separately from held and missing, so without
+                  it the tiles don't sum to the cycle's stops. */}
+              <Stat label="Skipped" value={c!.skipped ?? 0} color="var(--rw-warning)" />
               <Stat label="Total stops" value={preview.totalStops} color="var(--rw-text-secondary)" />
             </div>
             <button className="rw-button" disabled={busy || c!.billable === 0} onClick={onGenerate} style={{ alignSelf: 'flex-start' }}>

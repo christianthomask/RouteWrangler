@@ -4,11 +4,11 @@ import {
   DEFAULT_VALIDATION_CONFIG,
   type ExceptionCode,
   type MeterHistoryResponse,
-  type ReadEventView,
   type SeverityCode,
 } from '@routewrangler/contracts';
 import { DB } from '../db/db.module';
 import type { Database } from '../db/client';
+import { toReadEventView } from '../read-events/read-view';
 import {
   clients,
   exceptions,
@@ -16,11 +16,9 @@ import {
   meters,
   readEvents,
   severities,
-  users,
 } from '../db/schema';
 import { STORAGE, type StoragePort } from '../storage/storage.port';
 
-const PHOTO_URL_TTL = 900;
 
 /** Meter history view (BUILD_SPEC §7.3): chart, all events, prior exceptions. */
 @Injectable()
@@ -77,7 +75,7 @@ export class MetersService {
       .where(eq(exceptions.meterId, meterId))
       .orderBy(desc(exceptions.createdAt));
 
-    const events = await Promise.all(eventRows.map((r) => this.toReadView(r)));
+    const events = await Promise.all(eventRows.map((r) => toReadEventView(this.db, this.storage, r)));
 
     return {
       meter: m,
@@ -100,36 +98,4 @@ export class MetersService {
 
   // NOTE: duplicated from ExceptionsService.toReadView — the two drifted once
   // already. Worth extracting to a shared mapper.
-  private async toReadView(r: typeof readEvents.$inferSelect): Promise<ReadEventView> {
-    const [reader] = await this.db
-      .select({ name: users.displayName })
-      .from(users)
-      .where(eq(users.id, r.readerId))
-      .limit(1);
-
-    let photoUrl: string | null = null;
-    if (r.photoKey && this.storage.configured) {
-      try {
-        photoUrl = await this.storage.presignDownload(r.photoKey, PHOTO_URL_TTL);
-      } catch {
-        photoUrl = null;
-      }
-    }
-    return {
-      id: r.id,
-      value: r.value,
-      consumption: r.consumption,
-      readerId: r.readerId,
-      readerName: reader?.name ?? null,
-      capturedAt: r.capturedAt.toISOString(),
-      receivedAt: r.receivedAt.toISOString(),
-      sourceType: r.sourceType,
-      lat: r.lat,
-      lng: r.lng,
-      billable: r.billable,
-      annotations: (r.annotations ?? {}) as Record<string, unknown>,
-      note: r.note ?? null,
-      photoUrl,
-    };
-  }
 }

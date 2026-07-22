@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, gte, inArray, lt, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, notInArray, or, sql } from 'drizzle-orm';
 import {
   DEFAULT_VALIDATION_CONFIG,
   type ExceptionCode,
@@ -12,12 +12,13 @@ import {
   type ExceptionFilters,
   type ExceptionListItem,
   type ExceptionStatus,
-  type ReadEventView,
   type ResolveRequest,
   type SeverityCode,
+  type SkipReasonCode,
 } from '@routewrangler/contracts';
 import { DB } from '../db/db.module';
 import type { Database } from '../db/client';
+import { toReadEventView } from '../read-events/read-view';
 import {
   clients,
   exceptions,
@@ -26,15 +27,15 @@ import {
   readEvents,
   rereadTasks,
   routeRuns,
+  skipReasons,
+  users,
   runStops,
   severities,
-  users,
 } from '../db/schema';
 import { STORAGE, type StoragePort } from '../storage/storage.port';
 import { AuditService } from '../audit/audit.service';
 import { MAX_REREADS, TERMINAL_STATUSES, allowedActions, isTerminal } from './lifecycle';
 
-const PHOTO_URL_TTL = 900;
 
 @Injectable()
 export class ExceptionsService {
@@ -69,6 +70,7 @@ export class ExceptionsService {
         serviceAddress: meters.serviceAddress,
         value: readEvents.value,
         consumption: readEvents.consumption,
+        skipReasonCode: skipReasons.code,
         rereadCount: exceptions.rereadCount,
         createdAt: exceptions.createdAt,
       })
@@ -77,8 +79,14 @@ export class ExceptionsService {
       .innerJoin(severities, eq(exceptions.severityId, severities.id))
       .innerJoin(meters, eq(exceptions.meterId, meters.id))
       .innerJoin(clients, eq(exceptions.clientId, clients.id))
-      .innerJoin(readEvents, eq(exceptions.readEventId, readEvents.id))
-      .leftJoin(runStops, eq(readEvents.runStopId, runStops.id))
+      // Both joins are left: an exception hangs off a read OR a stop, never
+      // both, so requiring either would silently drop half the queue.
+      .leftJoin(readEvents, eq(exceptions.readEventId, readEvents.id))
+      .leftJoin(
+        runStops,
+        or(eq(exceptions.runStopId, runStops.id), eq(readEvents.runStopId, runStops.id)),
+      )
+      .leftJoin(skipReasons, eq(runStops.skipReasonId, skipReasons.id))
       .leftJoin(routeRuns, eq(runStops.runId, routeRuns.id))
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(desc(severities.rank), desc(exceptions.createdAt));
@@ -96,6 +104,7 @@ export class ExceptionsService {
       serviceAddress: r.serviceAddress,
       value: r.value,
       consumption: r.consumption,
+      skipReasonCode: r.skipReasonCode as SkipReasonCode | null,
       rereadCount: r.rereadCount,
       createdAt: r.createdAt.toISOString(),
     }));
@@ -123,6 +132,7 @@ export class ExceptionsService {
         registerDials: meters.registerDials,
         accessNotes: meters.accessNotes,
         flaggedReadId: exceptions.readEventId,
+        runStopId: exceptions.runStopId,
       })
       .from(exceptions)
       .innerJoin(exceptionTypes, eq(exceptions.typeId, exceptionTypes.id))
@@ -133,11 +143,10 @@ export class ExceptionsService {
       .limit(1);
     if (!row) throw new NotFoundException('exception not found');
 
-    const [flaggedRow] = await this.db
-      .select()
-      .from(readEvents)
-      .where(eq(readEvents.id, row.flaggedReadId))
-      .limit(1);
+    // A skip exception has no reading — that is what makes it a skip.
+    const [flaggedRow] = row.flaggedReadId
+      ? await this.db.select().from(readEvents).where(eq(readEvents.id, row.flaggedReadId)).limit(1)
+      : [];
 
     const rereadRows = await this.db
       .select()
@@ -145,8 +154,11 @@ export class ExceptionsService {
       .where(eq(readEvents.exceptionId, id))
       .orderBy(asc(readEvents.receivedAt));
 
-    const flaggedRead = await this.toReadView(flaggedRow!);
-    const rereads = await Promise.all(rereadRows.map((r) => this.toReadView(r)));
+    const flaggedRead = flaggedRow
+      ? await toReadEventView(this.db, this.storage, flaggedRow)
+      : null;
+    const skip = row.runStopId ? await this.skipContext(row.runStopId) : null;
+    const rereads = await Promise.all(rereadRows.map((r) => toReadEventView(this.db, this.storage, r)));
 
     // Trailing consumption series for the chart.
     const cutoff = new Date();
@@ -183,6 +195,7 @@ export class ExceptionsService {
         accessNotes: row.accessNotes,
       },
       flaggedRead,
+      skip,
       rereads,
       consumptionSeries: series.map((s) => ({
         capturedAt: s.capturedAt.toISOString(),
@@ -190,42 +203,53 @@ export class ExceptionsService {
         consumption: s.consumption,
         flagged: s.id === row.flaggedReadId,
       })),
-      allowedActions: allowedActions(row.status, row.rereadCount),
+      // A skip cannot be re-read: there is no reading to re-take, and ordering
+      // one would dispatch a task against a stop the reader could not reach.
+      allowedActions: allowedActions(row.status, row.rereadCount).filter(
+        (a) => a !== 'reread' || !row.runStopId,
+      ),
     };
   }
 
-  private async toReadView(r: typeof readEvents.$inferSelect): Promise<ReadEventView> {
-    const [reader] = await this.db
-      .select({ name: users.displayName })
-      .from(users)
-      .where(eq(users.id, r.readerId))
+  /** Reason, evidence and who skipped it — the skip equivalent of a flagged read. */
+  private async skipContext(runStopId: string) {
+    const [row] = await this.db
+      .select({
+        runId: runStops.runId,
+        runStopId: runStops.id,
+        reasonCode: skipReasons.code,
+        reasonLabel: skipReasons.label,
+        photoKey: runStops.skipPhotoKey,
+        readerName: users.displayName,
+        skippedAt: runStops.updatedAt,
+      })
+      .from(runStops)
+      .innerJoin(routeRuns, eq(runStops.runId, routeRuns.id))
+      .leftJoin(skipReasons, eq(runStops.skipReasonId, skipReasons.id))
+      .leftJoin(users, eq(routeRuns.readerId, users.id))
+      .where(eq(runStops.id, runStopId))
       .limit(1);
+    if (!row) return null;
 
     let photoUrl: string | null = null;
-    if (r.photoKey && this.storage.configured) {
+    if (row.photoKey && this.storage.configured) {
       try {
-        photoUrl = await this.storage.presignDownload(r.photoKey, PHOTO_URL_TTL);
+        photoUrl = await this.storage.presignDownload(row.photoKey, 300);
       } catch {
         photoUrl = null;
       }
     }
     return {
-      id: r.id,
-      value: r.value,
-      consumption: r.consumption,
-      capturedAt: r.capturedAt.toISOString(),
-      receivedAt: r.receivedAt.toISOString(),
-      sourceType: r.sourceType,
-      lat: r.lat,
-      lng: r.lng,
-      billable: r.billable,
-      annotations: (r.annotations ?? {}) as Record<string, unknown>,
-      readerId: r.readerId,
-      readerName: reader?.name ?? null,
-      note: r.note ?? null,
+      runId: row.runId,
+      runStopId: row.runStopId,
+      reasonCode: row.reasonCode as SkipReasonCode | null,
+      reasonLabel: row.reasonLabel,
       photoUrl,
+      readerName: row.readerName,
+      skippedAt: row.skippedAt.toISOString(),
     };
   }
+
 
   // ── action lifecycle (W4) ────────────────────────────────────────────────
   private async load(id: string) {
@@ -252,7 +276,10 @@ export class ExceptionsService {
       // meter a second time for a job already in hand.
       throw new ConflictException('a reread is already outstanding for this exception');
     }
-    const readerId = (await this.flaggedReader(ex.readEventId)) ?? actorId;
+    // A skip has no flagged read, and no reread — guarded above by
+    // allowedActions — so fall back to the actor.
+    const readerId =
+      (ex.readEventId ? await this.flaggedReader(ex.readEventId) : null) ?? actorId;
 
     /*
      * The checks above are a fast path for the common case; they are not the
@@ -351,8 +378,13 @@ export class ExceptionsService {
   ): Promise<ExceptionDetail> {
     const ex = await this.load(id);
     this.ensureNotTerminal(ex.status);
+    /*
+     * A skip has no reading, so there is nothing to certify: resolving one is a
+     * decision about the stop, not about which read to bill. Only validate the
+     * certified read when there is one.
+     */
     const certified = req.certifiedReadEventId ?? ex.readEventId;
-    await this.assertReadBelongs(certified, ex);
+    if (certified) await this.assertReadBelongs(certified, ex);
     // Same guard as escalate: this decides what gets billed, so two supervisors
     // closing the same exception concurrently must not both win — the second
     // gets a conflict rather than silently overwriting the first's certified
@@ -420,7 +452,7 @@ export class ExceptionsService {
    */
   private async assertReadBelongs(
     readEventId: string,
-    ex: { id: string; meterId: string; readEventId: string },
+    ex: { id: string; meterId: string; readEventId: string | null },
   ): Promise<void> {
     const [r] = await this.db
       .select({
@@ -440,7 +472,8 @@ export class ExceptionsService {
     // The flagged read, or a reread ordered for this exception, always qualify.
     if (readEventId === ex.readEventId || r.exceptionId === ex.id) return;
 
-    const flaggedCycle = await this.cycleOfRead(ex.readEventId);
+    // Only a read-backed exception has a flagged cycle to compare against.
+    const flaggedCycle = ex.readEventId ? await this.cycleOfRead(ex.readEventId) : null;
     if (flaggedCycle && r.cycleId && r.cycleId !== flaggedCycle) {
       throw new ConflictException('certified read is from a different billing cycle');
     }

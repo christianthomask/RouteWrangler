@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import type { RereadTaskView } from '@routewrangler/contracts';
 import { fetchRereadTasks } from '@/lib/api';
 import { EmptyState, Loading } from '@/components/ui';
@@ -32,8 +33,22 @@ export default function RereadTasksPage() {
       ) : (
         <div className="rw-card" style={{ padding: 0 }}>
           <div className="rw-rows">
-            {tasks.map((t) => (
-              <div key={t.id} className="rw-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+            {tasks.map((t) => {
+              // A task with no stop (a backfill read) has nowhere to send the
+              // reader, so it stays inert rather than linking somewhere useless.
+              const href =
+                t.runId && t.runStopId
+                  ? `/field/runs/${t.runId}/stops/${t.runStopId}?reread=${t.exceptionId}`
+                  : null;
+              const rowStyle = {
+                flexDirection: 'column' as const,
+                alignItems: 'stretch' as const,
+                gap: 4,
+                textDecoration: 'none',
+                color: 'inherit',
+              };
+              const body = (
+                <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
                   <strong style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {t.meterSerial}
@@ -48,9 +63,20 @@ export default function RereadTasksPage() {
                 <div style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-secondary)' }}>{t.serviceAddress}</div>
                 <div style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)' }}>
                   {t.typeLabel} · flagged value <span className="tabular">{t.flaggedValue}</span>
+                  {href && <span style={{ color: 'var(--rw-brand)' }}> · Tap to re-read</span>}
                 </div>
-              </div>
-            ))}
+                </>
+              );
+              return href ? (
+                <Link key={t.id} href={href} className="rw-row" style={rowStyle}>
+                  {body}
+                </Link>
+              ) : (
+                <div key={t.id} className="rw-row" style={rowStyle}>
+                  {body}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

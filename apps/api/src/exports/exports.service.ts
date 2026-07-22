@@ -224,8 +224,12 @@ export class ExportsService {
           .innerJoin(exceptionTypes, eq(exceptions.typeId, exceptionTypes.id))
           .where(inArray(exceptions.readEventId, readIds))
       : [];
+    // Only read-backed exceptions are keyed here. A skip's exception hangs off
+    // the stop, and a skipped stop is already held by `skipReasonCode` — it
+    // never reaches the billable branch, so it needs no entry.
     const byRead = new Map<string, typeof excRows>();
     for (const e of excRows) {
+      if (!e.readEventId) continue;
       const arr = byRead.get(e.readEventId) ?? [];
       arr.push(e);
       byRead.set(e.readEventId, arr);

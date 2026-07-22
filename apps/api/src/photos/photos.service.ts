@@ -24,7 +24,11 @@ export class PhotosService {
 
   async presign(req: PresignRequest): Promise<PresignResponse> {
     const ext = EXT_BY_TYPE[req.contentType] ?? 'bin';
-    const photoKey = `photos/${req.readEventId}.${ext}`;
+    // Skip photos are keyed by the stop, reads by the event. Both are immutable
+    // ids, so both keys stay pure functions of what they describe (ADR-013).
+    const photoKey = req.readEventId
+      ? `photos/${req.readEventId}.${ext}`
+      : `photos/skip/${req.runStopId}.${ext}`;
 
     // NullStorage throws a labeled 503 here when nothing is configured.
     const upload = await this.storage.presignUpload(photoKey, req.contentType, EXPIRES_SECONDS);

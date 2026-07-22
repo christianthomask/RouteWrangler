@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type {
   ExceptionFilters,
   ExceptionListItem,
@@ -18,7 +18,27 @@ export default function ExceptionsPage() {
   const router = useRouter();
   const [taxonomy, setTaxonomy] = useState<TaxonomyResponse | null>(null);
   const [items, setItems] = useState<ExceptionListItem[] | null>(null);
-  const [filters, setFilters] = useState<ExceptionFilters>({ status: 'open' });
+  /*
+   * Filters live in the URL. They used to be component state only, so a filtered
+   * queue could not be shared or bookmarked, and refresh or Back silently
+   * dropped it — on a screen whose whole job is narrowing a list.
+   */
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const filters: ExceptionFilters = {
+    ...(params.get('status') && params.get('status') !== 'all'
+      ? { status: params.get('status') as ExceptionFilters['status'] }
+      : {}),
+    ...(params.get('severity')
+      ? { severity: params.get('severity') as ExceptionFilters['severity'] }
+      : {}),
+    ...(params.get('type') ? { type: params.get('type') as ExceptionFilters['type'] } : {}),
+  };
+  // Default view is the open queue; an explicit `status=` (including "all",
+  // which drops the key) is respected.
+  if (!params.has('status') && !params.has('severity') && !params.has('type')) {
+    filters.status = 'open';
+  }
   const [error, setError] = useState<string | null>(null);
   /** Groups the supervisor has chosen to open. Reset whenever the filters change. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -34,15 +54,18 @@ export default function ExceptionsPage() {
     fetchExceptions(filters)
       .then((r) => setItems(r.exceptions))
       .catch((e) => setError(e instanceof Error ? e.message : 'failed'));
-  }, [filters]);
+    // Keyed on the serialised query, not the object — `filters` is rebuilt on
+    // every render and would otherwise refetch in a loop.
+  }, [params.toString()]);
 
   function set<K extends keyof ExceptionFilters>(key: K, value: ExceptionFilters[K] | '') {
-    setFilters((f) => {
-      const next = { ...f };
-      if (value === '') delete next[key];
-      else next[key] = value as ExceptionFilters[K];
-      return next;
-    });
+    const next = new URLSearchParams(params.toString());
+    if (value === '') next.delete(key);
+    else next.set(key, String(value));
+    // `status` is explicitly recorded even when cleared, so "all statuses" is
+    // distinguishable from "no filters yet" — which defaults to the open queue.
+    if (key === 'status' && value === '') next.set('status', 'all');
+    router.replace(next.toString() ? `${pathname}?${next}` : pathname, { scroll: false });
   }
 
   return (
@@ -56,7 +79,12 @@ export default function ExceptionsPage() {
           options={(taxonomy?.severities ?? []).map((s) => [s.code, s.label])} />
         <Filter label="Type" value={filters.type ?? ''} onChange={(v) => set('type', v as never)}
           options={(taxonomy?.exceptionTypes ?? []).map((t) => [t.code, t.label])} />
-        <button className="rw-button rw-button--ghost" onClick={() => setFilters({})}>Clear</button>
+        <button
+          className="rw-button rw-button--ghost"
+          onClick={() => router.replace(`${pathname}?status=all`, { scroll: false })}
+        >
+          Clear
+        </button>
       </div>
 
       {error ? (
@@ -106,8 +134,15 @@ export default function ExceptionsPage() {
                   <span style={{ color: 'var(--rw-text-muted)' }}> · {e.clientName} · {e.serviceAddress}</span>
                 </div>
                 <div className="rw-row__meta tabular">
-                  <span>value {num(e.value)}</span>
-                  <span>consumption {num(e.consumption)}</span>
+                  {/* A skip has no reading — the reason is what there is to show. */}
+                  {e.value == null ? (
+                    <span>{e.skipReasonCode ? e.skipReasonCode.replace(/_/g, ' ') : 'skipped'}</span>
+                  ) : (
+                    <>
+                      <span>value {num(e.value)}</span>
+                      <span>consumption {num(e.consumption)}</span>
+                    </>
+                  )}
                   <span style={{ marginLeft: 'auto' }}>{relativeTime(e.createdAt)}</span>
                 </div>
               </button>

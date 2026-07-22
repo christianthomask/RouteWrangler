@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNull, notExists, sql, type SQL } from 'drizzle-orm';
+import { skipRequiresPhoto } from '@routewrangler/contracts';
 import type {
   AssignRunRequest,
   ReassignRequest,
@@ -24,6 +25,7 @@ import { todayIn } from '../config/clock';
 import type { Database } from '../db/client';
 import {
   clients,
+  exceptions,
   meters,
   readEvents,
   routeRuns,
@@ -34,6 +36,7 @@ import {
   users,
 } from '../db/schema';
 import { AuditService } from '../audit/audit.service';
+import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import { currentCycleId } from '../catalog/catalog.service';
 import { validateSplit, type StopLite } from './split';
 
@@ -48,6 +51,7 @@ export class RunsService {
     @Inject(DB) private readonly db: Database,
     @Inject(ENV) private readonly env: Env,
     private readonly audit: AuditService,
+    private readonly taxonomy: TaxonomyService,
   ) {}
 
   async list(filter: {
@@ -327,6 +331,7 @@ export class RunsService {
     stopId: string,
     code: SkipReasonCode,
     actorId: string,
+    photoKey?: string,
   ): Promise<RunDetail> {
     const [reason] = await this.db
       .select({ id: skipReasons.id })
@@ -335,9 +340,22 @@ export class RunsService {
       .limit(1);
     if (!reason) throw new NotFoundException('unknown skip reason');
 
+    // A skip takes a meter out of the billing cycle on the reader's word alone,
+    // so it has to carry evidence. The single exception is `unsafe_conditions`:
+    // the reader has just told us it is not safe to be there, and the right
+    // response is not "stay and photograph it".
+    if (skipRequiresPhoto(code) && !photoKey) {
+      throw new BadRequestException('a photo of the reason is required to skip this stop');
+    }
+
     const skipped = await this.db
       .update(runStops)
-      .set({ status: 'skipped', skipReasonId: reason.id, updatedAt: new Date() })
+      .set({
+        status: 'skipped',
+        skipReasonId: reason.id,
+        skipPhotoKey: photoKey ?? null,
+        updatedAt: new Date(),
+      })
       .where(and(eq(runStops.id, stopId), eq(runStops.runId, runId), eq(runStops.status, 'pending')))
       .returning({ id: runStops.id, meterId: runStops.meterId });
 
@@ -353,10 +371,43 @@ export class RunsService {
         entityId: stopId,
         meta: { runId, meterId: skipped[0].meterId, skipReasonCode: code },
       });
+      // A skipped meter will not bill, so it needs a supervisor's eyes. The
+      // exception points at the *stop* — a skip has no reading to point at.
+      await this.raiseSkipException(runId, stopId, skipped[0].meterId);
       // A run can be finished by skipping its last stop, not only by reading it.
       await this.closeIfComplete(runId);
     }
     return this.detail(runId);
+  }
+
+  /**
+   * Opens `skipped_unresolved` against the stop. Idempotent on the stop, so a
+   * replayed offline skip cannot stack duplicates in the supervisor's queue.
+   */
+  private async raiseSkipException(runId: string, stopId: string, meterId: string): Promise<void> {
+    const [run] = await this.db
+      .select({ clientId: routeRuns.clientId })
+      .from(routeRuns)
+      .where(eq(routeRuns.id, runId))
+      .limit(1);
+    if (!run) return;
+
+    const resolved = await this.taxonomy.resolve('skipped_unresolved');
+    const existing = await this.db
+      .select({ id: exceptions.id })
+      .from(exceptions)
+      .where(and(eq(exceptions.runStopId, stopId), eq(exceptions.typeId, resolved.typeId)))
+      .limit(1);
+    if (existing.length) return;
+
+    await this.db.insert(exceptions).values({
+      runStopId: stopId,
+      meterId,
+      clientId: run.clientId,
+      typeId: resolved.typeId,
+      severityId: resolved.severityId,
+      status: 'open',
+    });
   }
 
   /**

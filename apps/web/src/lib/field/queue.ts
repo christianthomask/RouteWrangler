@@ -44,24 +44,26 @@ async function requestPersistentStorage(): Promise<void> {
  * a later retry.
  */
 async function uploadPhoto(
-  readEventId: string,
+  target: { readEventId: string } | { runStopId: string },
   dataUrl: string,
   headers: Record<string, string>,
-): Promise<void> {
+): Promise<string> {
   const contentType = /^data:([^;,]+)/.exec(dataUrl)?.[1] || 'image/jpeg';
   const blob = await (await fetch(dataUrl)).blob(); // data URL → binary
   const presign = await fetch(`${config.apiBaseUrl}/photos/presign`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
-    body: JSON.stringify({ readEventId, contentType }),
+    body: JSON.stringify({ ...target, contentType }),
   });
   if (!presign.ok) throw new Error(`presign ${presign.status}`);
-  const { uploadUrl, headers: putHeaders } = (await presign.json()) as {
+  const { uploadUrl, headers: putHeaders, photoKey } = (await presign.json()) as {
     uploadUrl: string;
     headers: Record<string, string>;
+    photoKey: string;
   };
   const put = await fetch(uploadUrl, { method: 'PUT', headers: putHeaders, body: blob });
   if (!put.ok) throw new Error(`upload ${put.status}`);
+  return photoKey;
 }
 
 class FieldQueue {
@@ -227,19 +229,30 @@ class FieldQueue {
             // is reclaimed on the next session's prune.
             if (landed === 'synced' && a.read.photoDataUrl) {
               try {
-                await uploadPhoto(a.id, a.read.photoDataUrl, headers);
+                await uploadPhoto({ readEventId: a.id }, a.read.photoDataUrl, headers);
                 await this.persist({ ...a, state: 'synced', read: { ...a.read, photoDataUrl: null } });
               } catch {
                 /* read is safe; photo upload is best-effort */
               }
             }
           } else if (a.kind === 'skip' && a.skip) {
+            /*
+             * The photo goes up FIRST, because the server refuses a skip without
+             * one. That means a skip needing evidence cannot be recorded while
+             * offline — it stays queued until there is a connection, which is
+             * the honest outcome: the evidence is the point, and a skip that
+             * landed without it would be exactly the gap this closes.
+             */
+            let photoKey: string | undefined;
+            if (a.skip.photoDataUrl) {
+              photoKey = await uploadPhoto({ runStopId: a.skip.stopId }, a.skip.photoDataUrl, headers);
+            }
             const res = await fetch(
               `${config.apiBaseUrl}/runs/${a.skip.runId}/stops/${a.skip.stopId}/skip`,
               {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', ...headers },
-                body: JSON.stringify({ skipReasonCode: a.skip.skipReasonCode }),
+                body: JSON.stringify({ skipReasonCode: a.skip.skipReasonCode, photoKey }),
               },
             );
             if (!res.ok) throw new Error(`skip ${res.status}`);

@@ -2,8 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db/client';
+import { RunsService } from '../runs/runs.service';
+import type { AuditService } from '../audit/audit.service';
 import {
   clients,
+  exceptions,
   meters,
   readEvents,
   routeRuns,
@@ -200,5 +203,81 @@ suite('run stop read of record (integration)', () => {
     const [run] = await db.select().from(routeRuns).where(eq(routeRuns.id, f.runId));
     // Left open, a finished run reports as aging the next morning.
     expect(run?.status).toBe('closed');
+  });
+});
+
+/**
+ * Skipping a stop (W5 + skip evidence). A skip takes a meter out of the billing
+ * cycle on the reader's word alone, so it carries a reason AND a photograph of
+ * that reason, and it raises `skipped_unresolved` for a supervisor to review.
+ */
+suite('skip evidence and review (integration)', () => {
+  const { db, sql } = createDb(url ?? '');
+  const audit = { write: async () => {} } as unknown as AuditService;
+  const env = { APP_TIMEZONE: 'America/Los_Angeles' } as never;
+  const svc = new RunsService(db, env, audit, new TaxonomyService(db));
+
+  afterAll(async () => {
+    await sql.end();
+  });
+
+  async function stop() {
+    const clientId = randomUUID();
+    const routeId = randomUUID();
+    const meterId = randomUUID();
+    const readerId = randomUUID();
+    const runId = randomUUID();
+    const stopId = randomUUID();
+    await db.insert(clients).values({ id: clientId, name: `T-${clientId.slice(0, 8)}`, state: 'CA' });
+    await db.insert(routes).values({ id: routeId, clientId, name: 'R1' });
+    await db.insert(meters).values({
+      id: meterId, clientId, serial: `T-${meterId.slice(0, 8)}`,
+      serviceAddress: '1 Test St', registerDials: 5,
+    });
+    await db.insert(users).values({
+      id: readerId, cognitoSub: `test:${readerId}`, displayName: 'Test Reader', role: 'reader',
+    });
+    await db.insert(routeRuns).values({
+      id: runId, routeId, clientId, readerId,
+      runDate: '2026-07-18', cycleId: '2026-07', status: 'open',
+    });
+    await db.insert(runStops).values({ id: stopId, runId, meterId, sequence: 0, status: 'pending' });
+    return { runId, stopId, readerId, meterId };
+  }
+
+  it('refuses a skip with no photograph of the reason', async () => {
+    const f = await stop();
+    await expect(svc.skipStop(f.runId, f.stopId, 'no_access', f.readerId)).rejects.toThrow();
+    const [row] = await db.select().from(runStops).where(eq(runStops.id, f.stopId));
+    expect(row?.status).toBe('pending');
+  });
+
+  it('allows unsafe_conditions without one — do not ask a reader to linger', async () => {
+    const f = await stop();
+    await svc.skipStop(f.runId, f.stopId, 'unsafe_conditions', f.readerId);
+    const [row] = await db.select().from(runStops).where(eq(runStops.id, f.stopId));
+    expect(row?.status).toBe('skipped');
+  });
+
+  it('stores the photo and raises skipped_unresolved against the stop', async () => {
+    const f = await stop();
+    await svc.skipStop(f.runId, f.stopId, 'no_access', f.readerId, `photos/skip/${f.stopId}.jpg`);
+
+    const [row] = await db.select().from(runStops).where(eq(runStops.id, f.stopId));
+    expect(row?.skipPhotoKey).toBe(`photos/skip/${f.stopId}.jpg`);
+
+    const raised = await db.select().from(exceptions).where(eq(exceptions.runStopId, f.stopId));
+    expect(raised).toHaveLength(1);
+    // The exception hangs off the stop, never a synthetic read — a placeholder
+    // value would land in the meter's baseline and corrupt the next real read.
+    expect(raised[0]?.readEventId).toBeNull();
+  });
+
+  it('does not stack duplicate exceptions when a skip replays', async () => {
+    const f = await stop();
+    await svc.skipStop(f.runId, f.stopId, 'no_access', f.readerId, 'photos/skip/x.jpg');
+    await svc.skipStop(f.runId, f.stopId, 'no_access', f.readerId, 'photos/skip/x.jpg');
+    const raised = await db.select().from(exceptions).where(eq(exceptions.runStopId, f.stopId));
+    expect(raised).toHaveLength(1);
   });
 });

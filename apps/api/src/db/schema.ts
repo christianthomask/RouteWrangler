@@ -11,6 +11,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  check,
   type AnyPgColumn,
   unique,
 } from 'drizzle-orm/pg-core';
@@ -169,6 +170,13 @@ export const runStops = pgTable(
     sequence: integer('sequence').notNull(),
     status: runStopStatusEnum('status').notNull().default('pending'),
     skipReasonId: uuid('skip_reason_id').references(() => skipReasons.id),
+    /**
+     * Photograph of *why* the stop was skipped — the locked gate, the
+     * obstruction. Required for every reason except `unsafe_conditions`, where
+     * asking a reader to stay put and take a picture is the wrong instruction.
+     * Keyed `photos/skip/<runStopId>` (ADR-013: derived, never mutated).
+     */
+    skipPhotoKey: text('skip_photo_key'),
     completedReadEventId: uuid('completed_read_event_id').references(
       (): AnyPgColumn => readEvents.id,
       { onDelete: 'set null' },
@@ -254,9 +262,21 @@ export const exceptions = pgTable(
   'exceptions',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    readEventId: uuid('read_event_id')
-      .notNull()
-      .references(() => readEvents.id),
+    /**
+     * An exception hangs off either a read or a *stop*.
+     *
+     * Reading anomalies point at the read event that produced them. A skip has
+     * no reading — that is the whole point of it — so `skipped_unresolved`
+     * points at the run stop instead. Exactly one of the two is set; the check
+     * constraint below is what keeps that true.
+     *
+     * The alternative, a synthetic zero-valued read, was rejected: read values
+     * feed the meter's baseline, so a placeholder would corrupt the consumption
+     * of the next real read, and ADR-002 defines a read event as a reading
+     * actually taken.
+     */
+    readEventId: uuid('read_event_id').references(() => readEvents.id),
+    runStopId: uuid('run_stop_id').references((): AnyPgColumn => runStops.id),
     meterId: uuid('meter_id')
       .notNull()
       .references(() => meters.id),
@@ -286,7 +306,14 @@ export const exceptions = pgTable(
   (t) => [
     // Export gathers a read's exceptions by read_event_id; console lists by meter (H7).
     index('exceptions_read_event_idx').on(t.readEventId),
+    index('exceptions_run_stop_idx').on(t.runStopId),
     index('exceptions_meter_idx').on(t.meterId),
+    // Exactly one target. Enforced here rather than in code because both writers
+    // (ingestion and skip) would otherwise have to be trusted to agree forever.
+    check(
+      'exceptions_one_target',
+      sql`(${t.readEventId} IS NULL) <> (${t.runStopId} IS NULL)`,
+    ),
   ],
 );
 

@@ -49,32 +49,59 @@ export default function ExceptionDetailPage() {
 
       <div className="rw-split">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-5)' }}>
-          <section className="rw-card">
-            <h2 style={cardTitle}>Consumption — last 12 months</h2>
-            <ConsumptionChart points={d.consumptionSeries} flaggedSeverity={d.severityCode} />
-            <ReadingInContext detail={d} />
-          </section>
+          {/* A skip has no reading, so the chart and read cards have nothing to
+              show — the reason and its photograph are the evidence instead. */}
+          {d.skip ? (
+            <section className="rw-card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-3)' }}>
+              <h2 style={cardTitle}>Why this stop was skipped</h2>
+              <p style={{ fontSize: 'var(--rw-text-xl)', fontWeight: 600, margin: 0 }}>
+                {d.skip.reasonLabel ?? d.skip.reasonCode ?? 'Reason not recorded'}
+              </p>
+              <p style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)', margin: 0 }}>
+                Skipped by {d.skip.readerName ?? 'an unknown reader'} ·{' '}
+                {new Date(d.skip.skippedAt).toLocaleString()}
+              </p>
+              <Link
+                href={`/supervisor/runs/${d.skip.runId}`}
+                style={{ fontSize: 'var(--rw-text-sm)' }}
+              >
+                Open the run →
+              </Link>
+            </section>
+          ) : (
+            <>
+              <section className="rw-card">
+                <h2 style={cardTitle}>Consumption — last 12 months</h2>
+                <ConsumptionChart points={d.consumptionSeries} flaggedSeverity={d.severityCode} />
+                <ReadingInContext detail={d} />
+              </section>
 
-          <section className="rw-card">
-            <h2 style={cardTitle}>{d.rereads.length ? 'Reads — original vs reread' : 'Flagged read'}</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${1 + d.rereads.length}, minmax(0,1fr))`, gap: 'var(--rw-space-3)' }}>
-              <ReadCard label="Original" read={d.flaggedRead} certified={d.certifiedReadEventId === d.flaggedRead.id} />
-              {d.rereads.map((r, i) => (
-                <ReadCard key={r.id} label={`Reread ${i + 1}`} read={r} certified={d.certifiedReadEventId === r.id} />
-              ))}
-            </div>
-          </section>
+              <section className="rw-card">
+                <h2 style={cardTitle}>{d.rereads.length ? 'Reads — original vs reread' : 'Flagged read'}</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${1 + d.rereads.length}, minmax(0,1fr))`, gap: 'var(--rw-space-3)' }}>
+                  {d.flaggedRead && (
+                    <ReadCard label="Original" read={d.flaggedRead} certified={d.certifiedReadEventId === d.flaggedRead.id} />
+                  )}
+                  {d.rereads.map((r, i) => (
+                    <ReadCard key={r.id} label={`Reread ${i + 1}`} read={r} certified={d.certifiedReadEventId === r.id} />
+                  ))}
+                </div>
+              </section>
+            </>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-5)' }}>
-          <section className="rw-card">
-            <h2 style={cardTitle}>Location</h2>
-            <GpsCompare meterLat={d.meter.lat} meterLng={d.meter.lng} captureLat={d.flaggedRead.lat} captureLng={d.flaggedRead.lng} />
-          </section>
+          {d.flaggedRead && (
+            <section className="rw-card">
+              <h2 style={cardTitle}>Location</h2>
+              <GpsCompare meterLat={d.meter.lat} meterLng={d.meter.lng} captureLat={d.flaggedRead.lat} captureLng={d.flaggedRead.lng} />
+            </section>
+          )}
 
           <section className="rw-card">
-            <h2 style={cardTitle}>Photo</h2>
-            <PhotoBlock url={d.flaggedRead.photoUrl} />
+            <h2 style={cardTitle}>{d.skip ? 'Photo of the reason' : 'Photo'}</h2>
+            <PhotoBlock url={d.skip ? d.skip.photoUrl : (d.flaggedRead?.photoUrl ?? null)} />
           </section>
 
           {d.meter.accessNotes && (
@@ -121,7 +148,8 @@ function PhotoBlock({ url }: { url: string | null }) {
 
 function ActionBar({ detail, onDone }: { detail: ExceptionDetail; onDone: (d: ExceptionDetail) => void }) {
   const [note, setNote] = useState('');
-  const [certified, setCertified] = useState(detail.flaggedRead.id);
+  // A skip has no reading, so there is nothing to certify as billable.
+  const [certified, setCertified] = useState(detail.flaggedRead?.id ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const allow = detail.allowedActions;
@@ -164,7 +192,9 @@ function ActionBar({ detail, onDone }: { detail: ExceptionDetail; onDone: (d: Ex
         <label style={{ display: 'block', marginBottom: 'var(--rw-space-3)' }}>
           <span className="rw-label">Certify as billable</span>
           <select className="rw-input" value={certified} onChange={(e) => setCertified(e.target.value)}>
-            <option value={detail.flaggedRead.id}>Original — {num(detail.flaggedRead.value)}</option>
+            {detail.flaggedRead && (
+              <option value={detail.flaggedRead.id}>Original — {num(detail.flaggedRead.value)}</option>
+            )}
             {detail.rereads.map((r, i) => (
               <option key={r.id} value={r.id}>Reread {i + 1} — {num(r.value)}</option>
             ))}
@@ -188,20 +218,27 @@ function ActionBar({ detail, onDone }: { detail: ExceptionDetail; onDone: (d: Ex
            * Show it disabled and say why instead.
            */
           detail.rereadCount >= 2 && (
-            <button className="rw-button" disabled title="Two rereads have already been ordered">
-              Reread limit reached (2/2)
-            </button>
+            <>
+              <button className="rw-button" disabled>
+                Reread limit reached (2/2)
+              </button>
+              {/* Inline, not a title tooltip — invisible on touch, and this is a
+                  phone-first console (ADR-018). Matches the split button. */}
+              <p style={{ margin: 0, fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)' }}>
+                Two rereads have already been ordered. Resolve or accept this exception instead.
+              </p>
+            </>
           )
         )}
         {allow.includes('resolve') && (
           <button className="rw-button rw-button--ghost" style={{ width: '100%' }} disabled={busy}
-            onClick={() => run(() => resolveException(detail.id, { note, certifiedReadEventId: certified }), true)}>
+            onClick={() => run(() => resolveException(detail.id, { note, ...(certified ? { certifiedReadEventId: certified } : {}) }), true)}>
             Resolve
           </button>
         )}
         {allow.includes('override') && (
           <button className="rw-button rw-button--ghost" style={{ width: '100%' }} disabled={busy}
-            onClick={() => run(() => overrideException(detail.id, { note, certifiedReadEventId: certified }), true)}>
+            onClick={() => run(() => overrideException(detail.id, { note, ...(certified ? { certifiedReadEventId: certified } : {}) }), true)}>
             Accept / override
           </button>
         )}
@@ -230,6 +267,7 @@ const cardTitle: React.CSSProperties = { fontSize: 'var(--rw-text-sm)', fontWeig
  * this read missed it. "Critical" is a conclusion; this is the evidence.
  */
 function ReadingInContext({ detail }: { detail: ExceptionDetail }) {
+  if (!detail.flaggedRead) return null;
   const series = detail.consumptionSeries;
   const flaggedAt = series.findIndex((p) => p.flagged);
   const previous = flaggedAt > 0 ? series[flaggedAt - 1] : undefined;

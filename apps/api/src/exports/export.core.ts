@@ -1,4 +1,12 @@
-import type { ExportCounts, ExportFormat, ExportHold, HoldReason } from '@routewrangler/contracts';
+import {
+  EXCEPTION_META,
+  SEVERITY_META,
+  type ExceptionCode,
+  type ExportCounts,
+  type ExportFormat,
+  type ExportHold,
+  type HoldReason,
+} from '@routewrangler/contracts';
 import { dateIn } from '../config/clock';
 
 /**
@@ -70,6 +78,13 @@ export interface Classification {
 /** An exception no longer blocks billing once it's been resolved or overridden. */
 const CLEARED = new Set(['resolved', 'overridden']);
 
+const RANK = new Map(SEVERITY_META.map((s) => [s.code, s.rank]));
+
+function severityRank(code: string): number {
+  const meta = EXCEPTION_META[code as ExceptionCode];
+  return meta ? (RANK.get(meta.defaultSeverity) ?? 0) : 0;
+}
+
 export function classify(rows: StopRow[]): Classification {
   const billable: BillableLine[] = [];
   const holds: ExportHold[] = [];
@@ -86,7 +101,12 @@ export function classify(rows: StopRow[]): Classification {
     // A read is held iff ANY of its exceptions still blocks billing (not yet
     // resolved/overridden). Fold across all of them — one blocking exception is
     // enough, and non-blocking siblings never make a held read billable.
-    const blocking = r.exceptions.find((e) => e.blocksBilling && !CLEARED.has(e.status));
+    // Most severe, not merely first: a meter held by a critical leak spike and a
+    // high read was reported under whichever the query happened to return, so a
+    // critical could be presented to the client as a lesser finding.
+    const blocking = r.exceptions
+      .filter((e) => e.blocksBilling && !CLEARED.has(e.status))
+      .sort((a, b) => severityRank(b.code) - severityRank(a.code))[0];
     if (blocking) {
       holds.push(hold(r, 'blocking_exception', blocking.code));
       continue;

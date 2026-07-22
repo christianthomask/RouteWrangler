@@ -22,6 +22,12 @@ export interface SkipPayload {
   runId: string;
   stopId: string;
   skipReasonCode: string;
+  /**
+   * Photograph of the reason, held locally until the skip syncs. Required for
+   * every reason except `unsafe_conditions` — a skip takes a meter out of the
+   * billing cycle on the reader's word, so it carries evidence.
+   */
+  photoDataUrl?: string | null;
 }
 
 export interface QueuedAction {
