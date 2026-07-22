@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { DevUser } from '@routewrangler/contracts';
 import { Brand } from '@/components/Brand';
 import { ClerkLogin } from '@/components/auth/ClerkLogin';
-import { authDevBypass, clerkConfigured, DEV_USERS, type DevUser } from '@/lib/config';
+import { authDevBypass, clerkConfigured } from '@/lib/config';
 import { signInDev } from '@/lib/session';
-import { fetchMe } from '@/lib/api';
+import { fetchDevUsers, fetchMe } from '@/lib/api';
 import { HOME_BY_ROLE } from '@/design/tokens';
 import { PRODUCT_DESCRIPTOR } from '@/design/brand';
 
@@ -14,6 +15,26 @@ export default function LoginPage() {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // null = still loading; the list comes from the API so staff created through
+  // Admin can sign in without a code change.
+  const [devUsers, setDevUsers] = useState<DevUser[] | null>(null);
+
+  useEffect(() => {
+    if (!authDevBypass) return;
+    let active = true;
+    fetchDevUsers()
+      .then((users) => {
+        if (active) setDevUsers(users);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setDevUsers([]);
+        setError(err instanceof Error ? err.message : 'Could not load sign-in options');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function continueAs(user: DevUser) {
     setError(null);
@@ -80,7 +101,16 @@ export default function LoginPage() {
                 replaces this in deployed environments.)
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-2)' }}>
-                {DEV_USERS.map((u) => (
+                {devUsers === null ? (
+                  <p style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)', margin: 0 }}>
+                    Loading accounts…
+                  </p>
+                ) : devUsers.length === 0 ? (
+                  <p style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)', margin: 0 }}>
+                    No accounts found — run <code>pnpm seed</code> to create them.
+                  </p>
+                ) : (
+                  devUsers.map((u) => (
                   <button
                     key={u.sub}
                     className="rw-button rw-button--ghost"
@@ -93,7 +123,8 @@ export default function LoginPage() {
                     </span>
                     <span className="rw-badge">{u.role}</span>
                   </button>
-                ))}
+                  ))
+                )}
               </div>
             </>
           ) : clerkConfigured ? (

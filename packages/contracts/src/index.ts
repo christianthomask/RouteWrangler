@@ -18,3 +18,4 @@ export * from './roster';
 export * from './assignment';
 export * from './field';
 export * from './exports';
+export * from './staff';

@@ -56,3 +56,14 @@ export const HOME_BY_ROLE: Record<Role, string> = {
   supervisor: '/supervisor',
   admin: '/admin',
 };
+
+/**
+ * Human-readable role names, for anywhere a role is *chosen* rather than just
+ * displayed. The `rw-badge` treatment uppercases the raw value, which is fine
+ * as a chip but reads poorly in a dropdown.
+ */
+export const ROLE_LABEL: Record<Role, string> = {
+  reader: 'Field reader',
+  supervisor: 'Supervisor',
+  admin: 'Admin',
+};

@@ -2,7 +2,9 @@
 
 import {
   ClientListResponseSchema,
+  CreateStaffResponseSchema,
   DashboardSchema,
+  DevUserListResponseSchema,
   ExceptionDetailSchema,
   ExceptionListResponseSchema,
   ExportCyclesResponseSchema,
@@ -17,9 +19,14 @@ import {
   RouteListResponseSchema,
   RunDetailSchema,
   RunListResponseSchema,
+  StaffListResponseSchema,
+  StaffMemberSchema,
   TaxonomyResponseSchema,
   type AssignRunRequest,
+  type CreateStaffRequest,
+  type CreateStaffResponse,
   type Dashboard,
+  type DevUser,
   type ExceptionDetail,
   type ExceptionFilters,
   type ExceptionListResponse,
@@ -27,10 +34,14 @@ import {
   type MeterHistoryResponse,
   type ReassignRequest,
   type ResolveRequest,
+  type Role,
   type RunDetail,
   type RunStatus,
   type SplitRequest,
+  type StaffMember,
   type TaxonomyResponse,
+  type UpdateStaffActiveRequest,
+  type UpdateStaffRoleRequest,
 } from '@routewrangler/contracts';
 import type { z } from 'zod';
 import { config } from './config';
@@ -65,9 +76,32 @@ async function request<T>(
     headers: { 'content-type': 'application/json', ...headers, ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
-    throw new ApiError(res.status, `${init?.method ?? 'GET'} ${path} → ${res.status}`);
+    throw new ApiError(res.status, await errorMessage(res, `${init?.method ?? 'GET'} ${path}`));
   }
   return schema.parse(await res.json());
+}
+
+/**
+ * Nest's exception filter returns `{ message, error, statusCode }`, and for the
+ * admin surfaces that message is the whole point — "that is the last active
+ * admin" is actionable in a way that "PATCH /staff/… → 409" is not. Falls back
+ * to the terse form when the body is missing, not JSON, or a Zod field map
+ * (which is an object, not a sentence, and would render as [object Object]).
+ */
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const body: unknown = await res.json();
+    if (body && typeof body === 'object' && 'message' in body) {
+      const { message } = body as { message: unknown };
+      if (typeof message === 'string' && message) return message;
+      if (Array.isArray(message) && message.every((m) => typeof m === 'string')) {
+        return message.join('; ');
+      }
+    }
+  } catch {
+    // fall through to the terse form
+  }
+  return `${fallback} → ${res.status}`;
 }
 
 export const fetchMe = () => request('/me', MeResponseSchema);
@@ -127,6 +161,36 @@ export const reassignRun = (id: string, readerId: string | null): Promise<RunDet
   request(`/runs/${id}/reassign`, RunDetailSchema, { method: 'POST', body: JSON.stringify({ readerId } satisfies ReassignRequest) });
 export const splitRun = (id: string, req: SplitRequest): Promise<RunDetail> =>
   request(`/runs/${id}/split`, RunDetailSchema, { method: 'POST', body: JSON.stringify(req) });
+
+// ── staff administration (admin only, ADR-024) ───────────────────────────────
+export const fetchStaff = () => request('/staff', StaffListResponseSchema);
+
+export const createStaff = (req: CreateStaffRequest): Promise<CreateStaffResponse> =>
+  request('/staff', CreateStaffResponseSchema, { method: 'POST', body: JSON.stringify(req) });
+
+export const setStaffRole = (id: string, role: Role): Promise<StaffMember> =>
+  request(`/staff/${id}/role`, StaffMemberSchema, {
+    method: 'PATCH',
+    body: JSON.stringify({ role } satisfies UpdateStaffRoleRequest),
+  });
+
+export const setStaffActive = (id: string, active: boolean): Promise<StaffMember> =>
+  request(`/staff/${id}/active`, StaffMemberSchema, {
+    method: 'PATCH',
+    body: JSON.stringify({ active } satisfies UpdateStaffActiveRequest),
+  });
+
+/**
+ * Sign-in choices for the local dev shim. Unauthenticated by necessity — the
+ * login page has no credential yet — so it bypasses `request`, which requires
+ * auth headers. The endpoint 404s whenever the bypass is off, which is what
+ * makes that safe.
+ */
+export async function fetchDevUsers(): Promise<DevUser[]> {
+  const res = await fetch(`${config.apiBaseUrl}/dev/users`);
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res, 'GET /dev/users'));
+  return DevUserListResponseSchema.parse(await res.json()).users;
+}
 
 // ── billing exports (W4) ─────────────────────────────────────────────────────
 export const fetchExportCycles = (clientId: string) =>

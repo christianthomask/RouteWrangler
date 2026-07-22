@@ -31,3 +31,4 @@ sprint that makes a non-obvious choice adds one.
 | [021](./ADR-021-offline-route-map.md) | Offline route map from stop coordinates (no tiles) |
 | [022](./ADR-022-self-hosted-basemap.md) | Real basemap via self-hosted PMTiles + MapLibre, offline per route |
 | [023](./ADR-023-billing-export.md) | Billing export: snapshot per client + cycle |
+| [024](./ADR-024-staff-directory-port.md) | Staff administration via a directory port; identity stays with the IdP (extends 015) |

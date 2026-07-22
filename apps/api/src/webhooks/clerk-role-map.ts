@@ -25,6 +25,25 @@ export function mapOrgRoleToAppRole(clerkRole: string): Role | null {
   }
 }
 
+/**
+ * The inverse of {@link mapOrgRoleToAppRole}, used when *we* drive Clerk rather
+ * than react to it (ADR-024: inviting staff, changing an org member's role).
+ *
+ * Total on purpose — every app role maps to exactly one org role, so a role
+ * pushed to Clerk always maps back to the role we intended. `org:member` is
+ * deliberately not a target: it only exists as an inbound alias for `reader`.
+ */
+export function mapAppRoleToOrgRole(role: Role): string {
+  switch (role) {
+    case 'admin':
+      return 'org:admin';
+    case 'supervisor':
+      return 'org:supervisor';
+    case 'reader':
+      return 'org:reader';
+  }
+}
+
 /** Builds a display name from Clerk's public user data, with sane fallbacks. */
 export function displayNameFrom(data: {
   first_name?: string | null;

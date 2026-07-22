@@ -158,6 +158,8 @@ wrangler secret put OIDC_ISSUER            # Clerk issuer, e.g. https://<slug>.c
 wrangler secret put OIDC_JWKS_URI          # <issuer>/.well-known/jwks.json
 wrangler secret put OIDC_AUDIENCE          # aud of the Clerk "api" JWT template
 wrangler secret put CLERK_WEBHOOK_SECRET   # Svix secret for POST /webhooks/clerk
+wrangler secret put CLERK_SECRET_KEY       # sk_... — lets Admin → Staff invite people (ADR-024)
+wrangler secret put CLERK_ORGANIZATION_ID  # org_... — the org invitations are sent into
 ```
 Non-secret, non-identifying vars are committed in `apps/api/wrangler.jsonc`
 (`AUTH_PROVIDER=oidc`, `STORAGE_PROVIDER=s3`, `S3_BUCKET=verameter-photos`,

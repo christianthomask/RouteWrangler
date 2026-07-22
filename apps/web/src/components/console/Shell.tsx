@@ -3,30 +3,56 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import type { MeResponse } from '@routewrangler/contracts';
+import type { MeResponse, Role } from '@routewrangler/contracts';
 import { BrandMark } from '@/components/Brand';
 import { PRODUCT_NAME } from '@/design/brand';
+import { HOME_BY_ROLE } from '@/design/tokens';
 import { fetchMe, ApiError } from '@/lib/api';
 import { signOut, isSignedIn } from '@/lib/session';
 
-const NAV = [
+export interface NavItem {
+  href: string;
+  label: string;
+}
+
+const SUPERVISOR_NAV: NavItem[] = [
   { href: '/supervisor', label: 'Dashboard' },
   { href: '/supervisor/runs', label: 'Runs' },
+  // Assigning work is a primary supervisor task, but the only route to it used
+  // to be a button on the roster page.
+  { href: '/supervisor/assign', label: 'Assign' },
   { href: '/supervisor/exceptions', label: 'Exceptions' },
   { href: '/supervisor/roster', label: 'Roster' },
   { href: '/supervisor/exports', label: 'Exports' },
 ];
 
-function isActive(pathname: string, href: string): boolean {
-  return href === '/supervisor' ? pathname === '/supervisor' : pathname.startsWith(href);
+/** The home link matches exactly; every other link matches its subtree. */
+function isActive(pathname: string, href: string, home: string): boolean {
+  return href === home ? pathname === home : pathname.startsWith(href);
 }
 
 /**
- * Supervisor console shell (ADR-018 — mobile-first). Desktop gets a left rail;
- * on phones the nav becomes a fixed bottom tab bar (supervisors work from the
- * field). Role-guarded (the API enforces roles server-side — BUILD_SPEC §6).
+ * Console shell (ADR-018 — mobile-first). Desktop gets a left rail; on phones
+ * the nav becomes a fixed bottom tab bar (supervisors work from the field).
+ *
+ * Parameterized by nav and permitted roles so the admin console reuses it rather
+ * than cloning it. Defaults reproduce the supervisor console exactly, which is
+ * what an unqualified `<Shell>` has always meant.
+ *
+ * Role-guarded here only for navigation; the API remains the authorization
+ * boundary (BUILD_SPEC §6).
  */
-export function Shell({ children }: { children: React.ReactNode }) {
+export function Shell({
+  children,
+  nav = SUPERVISOR_NAV,
+  home = '/supervisor',
+  allow = ['supervisor', 'admin'],
+}: {
+  children: React.ReactNode;
+  nav?: NavItem[];
+  home?: string;
+  allow?: Role[];
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -39,8 +65,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
     }
     fetchMe()
       .then((res) => {
-        if (res.role === 'reader') {
-          router.replace('/field');
+        if (!allow.includes(res.role)) {
+          router.replace(HOME_BY_ROLE[res.role]);
           return;
         }
         setMe(res);
@@ -52,6 +78,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
           setDenied(true);
         }
       });
+    // Deliberately keyed on `router` alone: `allow` is a per-shell literal, and
+    // including it would re-run this on every render (a new array each time).
   }, [router]);
 
   function onSignOut() {
@@ -62,13 +90,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="rw-shell">
       <aside className="rw-rail">
-        <Link href="/supervisor" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
+        <Link href={home} style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
           <BrandMark size={22} />
           <span style={{ fontWeight: 700, color: 'var(--rw-text)', letterSpacing: '-0.01em' }}>{PRODUCT_NAME}</span>
         </Link>
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {NAV.map((item) => {
-            const active = isActive(pathname, item.href);
+          {nav.map((item) => {
+            const active = isActive(pathname, item.href, home);
             return (
               <Link
                 key={item.href}
@@ -107,7 +135,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           }}
         >
           {/* brand shows in the header on mobile (rail is hidden) */}
-          <Link href="/supervisor" className="rw-brand-mobile" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
+          <Link href={home} className="rw-brand-mobile" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
             <BrandMark size={20} />
             <span style={{ fontWeight: 700, color: 'var(--rw-text)' }}>{PRODUCT_NAME}</span>
           </Link>
@@ -141,8 +169,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </div>
 
       <nav className="rw-bottomnav">
-        {NAV.map((item) => (
-          <Link key={item.href} href={item.href} data-active={isActive(pathname, item.href)}>
+        {nav.map((item) => (
+          <Link key={item.href} href={item.href} data-active={isActive(pathname, item.href, home)}>
             {item.label}
           </Link>
         ))}

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import type { StaffProvider } from '@routewrangler/contracts';
+import { isValidTimeZone } from './clock';
 
 /**
  * Env is validated once at boot — the API refuses to start with a malformed
@@ -18,6 +20,14 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   /** Comma-separated CORS allowlist. Unset → reflect any origin (dev only, M6). */
   CORS_ORIGINS: z.string().optional(),
+  /**
+   * IANA zone defining the operational working day. Run dates and "today" are
+   * calendar dates in the utility's own day, never UTC — see config/clock.ts.
+   */
+  APP_TIMEZONE: z
+    .string()
+    .default('America/Los_Angeles')
+    .refine(isValidTimeZone, 'must be a valid IANA time zone, e.g. America/Los_Angeles'),
 
   // ── auth (OIDC — Cognito, Entra, or generic) ──────────────────────────────
   AUTH_PROVIDER: z.enum(['cognito', 'entra', 'oidc']).default('cognito'),
@@ -34,6 +44,13 @@ const EnvSchema = z.object({
   OIDC_GROUPS_CLAIM: z.string().optional(),
   /** Svix signing secret for the Clerk membership webhook (role provisioning). */
   CLERK_WEBHOOK_SECRET: z.string().optional(),
+  /**
+   * Clerk Backend API credentials, used by the `clerk` staff-directory adapter
+   * to invite staff and change org roles (ADR-024). Both are required together:
+   * a secret key with no organization has nothing to invite anyone *into*.
+   */
+  CLERK_SECRET_KEY: z.string().optional(),
+  CLERK_ORGANIZATION_ID: z.string().optional(),
   /** Local-only auth shim (ADR-012). Never takes effect in production. */
   AUTH_DEV_BYPASS: bool,
 
@@ -68,6 +85,13 @@ export type Env = z.infer<typeof EnvSchema> & {
   storageConfigured: boolean;
   /** Parsed CORS allowlist, or null to reflect any origin (dev). */
   corsOrigins: string[] | null;
+  /**
+   * Which staff-directory adapter is active (ADR-024). `clerk` whenever Clerk
+   * Backend credentials are present; otherwise `local`, which is only usable
+   * while the dev-auth shim is on. Resolved here so the decision is made once,
+   * at boot, alongside the other provider choices.
+   */
+  staffProvider: StaffProvider;
 };
 
 function resolveOidc(p: z.infer<typeof EnvSchema>): OidcConfig | undefined {
@@ -125,6 +149,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     authConfigured: Boolean(oidc),
     authDevBypass: parsed.AUTH_DEV_BYPASS && parsed.NODE_ENV !== 'production',
     storageConfigured: resolveStorageConfigured(parsed),
+    staffProvider: parsed.CLERK_SECRET_KEY && parsed.CLERK_ORGANIZATION_ID ? 'clerk' : 'local',
     corsOrigins: parsed.CORS_ORIGINS
       ? parsed.CORS_ORIGINS.split(',')
           .map((s) => s.trim())

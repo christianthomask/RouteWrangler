@@ -1,5 +1,3 @@
-import type { Role } from '@routewrangler/contracts';
-
 /**
  * Public runtime config. Auth is provider-agnostic (ADR-015): Clerk in prod
  * (via OIDC), a labeled dev-bypass locally so the console runs against the API
@@ -37,14 +35,7 @@ export const authDevBypass =
   !clerkConfigured &&
   (process.env.NEXT_PUBLIC_AUTH_DEV_BYPASS ?? 'true') !== 'false';
 
-/** Seeded users for local "Continue as" (matches the API seed subs). */
-export interface DevUser {
-  sub: string;
-  displayName: string;
-  role: Role;
-}
-export const DEV_USERS: DevUser[] = [
-  { sub: 'local-only:jeramehl', displayName: 'Jeramehl', role: 'supervisor' },
-  { sub: 'local-only:admin', displayName: 'System Admin', role: 'admin' },
-  { sub: 'local-only:reader1', displayName: 'Field Reader One', role: 'reader' },
-];
+// The "Continue as …" list used to be a hardcoded constant here. It drifted —
+// it listed three of the four seeded users — and could never include staff
+// created through Admin. The login page now reads GET /dev/users instead, which
+// is served only while the API's own bypass is active. See `fetchDevUsers`.
