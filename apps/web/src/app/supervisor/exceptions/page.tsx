@@ -20,6 +20,8 @@ export default function ExceptionsPage() {
   const [items, setItems] = useState<ExceptionListItem[] | null>(null);
   const [filters, setFilters] = useState<ExceptionFilters>({ status: 'open' });
   const [error, setError] = useState<string | null>(null);
+  /** Groups the supervisor has chosen to open. Reset whenever the filters change. */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchTaxonomy().then(setTaxonomy).catch(() => {});
@@ -27,6 +29,8 @@ export default function ExceptionsPage() {
 
   useEffect(() => {
     setItems(null);
+    // A new result set makes the old group keys meaningless.
+    setExpanded(new Set());
     fetchExceptions(filters)
       .then((r) => setItems(r.exceptions))
       .catch((e) => setError(e instanceof Error ? e.message : 'failed'));
@@ -64,7 +68,31 @@ export default function ExceptionsPage() {
       ) : (
         <div className="rw-card" style={{ padding: 0 }}>
           <div className="rw-rows">
-            {items.map((e) => (
+            {groupRuns(items).map((g) =>
+              g.collapsed && !expanded.has(g.key) ? (
+                <button
+                  key={g.key}
+                  className="rw-row"
+                  onClick={() => setExpanded((prev) => new Set(prev).add(g.key))}
+                >
+                  <div className="rw-row__top">
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <SeverityChip severity={g.items[0]!.severityCode} />
+                      <strong style={{ whiteSpace: 'nowrap' }}>{g.items[0]!.typeLabel}</strong>
+                    </span>
+                    <StatusBadge status={g.items[0]!.status} />
+                  </div>
+                  <div style={{ fontSize: 'var(--rw-text-sm)' }}>
+                    <span style={{ fontWeight: 500 }}>{g.items.length} meters</span>
+                    <span style={{ color: 'var(--rw-text-muted)' }}> · {g.items[0]!.clientName}</span>
+                  </div>
+                  <div className="rw-row__meta tabular">
+                    <span style={{ color: 'var(--rw-brand)' }}>Show all {g.items.length}</span>
+                    <span style={{ marginLeft: 'auto' }}>{relativeTime(g.items[0]!.createdAt)}</span>
+                  </div>
+                </button>
+              ) : (
+                g.items.map((e) => (
               <button key={e.id} className="rw-row" onClick={() => router.push(`/supervisor/exceptions/${e.id}`)}>
                 <div className="rw-row__top">
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -83,12 +111,41 @@ export default function ExceptionsPage() {
                   <span style={{ marginLeft: 'auto' }}>{relativeTime(e.createdAt)}</span>
                 </div>
               </button>
-            ))}
+                ))
+              ),
+            )}
           </div>
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * Collapses a run of low-severity findings of the same kind into one row.
+ *
+ * A device with GPS denied raises one `location_absent` per stop, so a single
+ * route can bury the two critical leaks it also produced under a dozen
+ * identical rows. Grouping is by type + client + status, and only kicks in past
+ * a threshold, so an ordinary queue is untouched — and only for low severity,
+ * because a run of criticals is exactly what must never be folded away.
+ */
+const COLLAPSE_AT = 4;
+
+function groupRuns(items: ExceptionListItem[]) {
+  const out: { key: string; items: ExceptionListItem[]; collapsed: boolean }[] = [];
+  for (const e of items) {
+    const key = `${e.typeCode}|${e.clientId}|${e.status}`;
+    const last = out[out.length - 1];
+    // Contiguous only: the server's severity-first ordering is meaningful, and
+    // gathering scattered rows together would silently reorder the queue.
+    if (last && last.key === key) last.items.push(e);
+    else out.push({ key, items: [e], collapsed: false });
+  }
+  for (const g of out) {
+    g.collapsed = g.items.length >= COLLAPSE_AT && g.items[0]!.severityCode === 'low';
+  }
+  return out;
 }
 
 function Filter({
