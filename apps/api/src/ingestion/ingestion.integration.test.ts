@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq, inArray } from 'drizzle-orm';
 import { createDb, type Database } from '../db/client';
 import { RunsService } from '../runs/runs.service';
@@ -16,6 +16,7 @@ import {
   users,
 } from '../db/schema';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
+import { seedTaxonomy } from '../../seed/taxonomy';
 import { IngestionService } from './ingestion.service';
 
 /**
@@ -89,6 +90,16 @@ suite('ingestion idempotency (integration)', () => {
   const svc = new IngestionService(db, new TaxonomyService(db));
 
   const fixtures = tracker();
+  /*
+   * Exception types, severities and skip reasons are taxonomy-as-data (ADR-003),
+   * so ingestion and skipping both resolve them from the database. CI migrates
+   * but does not seed, so these suites seed the lookups themselves — idempotent,
+   * and the reason they passed locally against an already-seeded dev database
+   * while failing in CI.
+   */
+  beforeAll(async () => {
+    await seedTaxonomy(db);
+  });
   afterAll(async () => {
     await cleanup(db, fixtures);
     await sql.end();
@@ -160,6 +171,16 @@ suite('run stop read of record (integration)', () => {
   const svc = new IngestionService(db, new TaxonomyService(db));
 
   const fixtures = tracker();
+  /*
+   * Exception types, severities and skip reasons are taxonomy-as-data (ADR-003),
+   * so ingestion and skipping both resolve them from the database. CI migrates
+   * but does not seed, so these suites seed the lookups themselves — idempotent,
+   * and the reason they passed locally against an already-seeded dev database
+   * while failing in CI.
+   */
+  beforeAll(async () => {
+    await seedTaxonomy(db);
+  });
   afterAll(async () => {
     await cleanup(db, fixtures);
     await sql.end();
@@ -284,6 +305,16 @@ suite('skip evidence and review (integration)', () => {
   const svc = new RunsService(db, env, audit, new TaxonomyService(db));
 
   const fixtures = tracker();
+  /*
+   * Exception types, severities and skip reasons are taxonomy-as-data (ADR-003),
+   * so ingestion and skipping both resolve them from the database. CI migrates
+   * but does not seed, so these suites seed the lookups themselves — idempotent,
+   * and the reason they passed locally against an already-seeded dev database
+   * while failing in CI.
+   */
+  beforeAll(async () => {
+    await seedTaxonomy(db);
+  });
   afterAll(async () => {
     await cleanup(db, fixtures);
     await sql.end();
