@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
-import { createDb } from '../db/client';
+import { eq, inArray } from 'drizzle-orm';
+import { createDb, type Database } from '../db/client';
 import { RunsService } from '../runs/runs.service';
 import type { AuditService } from '../audit/audit.service';
 import {
@@ -26,11 +26,71 @@ import { IngestionService } from './ingestion.service';
 const url = process.env.DATABASE_URL;
 const suite = url ? describe : describe.skip;
 
+/**
+ * These suites write real rows to whatever DATABASE_URL points at — locally,
+ * the dev database. Left behind, the fixtures show up as phantom clients and
+ * meters in the console. Each suite records what it created and removes it,
+ * children first, so a developer's database looks the same after a test run as
+ * before one.
+ */
+interface Fixtures {
+  clientIds: string[];
+  readerIds: string[];
+}
+
+function tracker(): Fixtures {
+  return { clientIds: [], readerIds: [] };
+}
+
+async function cleanup(db: Database, f: Fixtures): Promise<void> {
+  if (!f.clientIds.length && !f.readerIds.length) return;
+
+  const runIds = f.clientIds.length
+    ? (
+        await db
+          .select({ id: routeRuns.id })
+          .from(routeRuns)
+          .where(inArray(routeRuns.clientId, f.clientIds))
+      ).map((r) => r.id)
+    : [];
+  const stopIds = runIds.length
+    ? (await db.select({ id: runStops.id }).from(runStops).where(inArray(runStops.runId, runIds))).map(
+        (r) => r.id,
+      )
+    : [];
+  const meterIds = f.clientIds.length
+    ? (await db.select({ id: meters.id }).from(meters).where(inArray(meters.clientId, f.clientIds))).map(
+        (m) => m.id,
+      )
+    : [];
+
+  /*
+   * Strict child-to-parent order. Exceptions reference read_events, and
+   * run_stops references a read event back — so every exception goes first, the
+   * back-reference is nulled, and only then can the reads be removed.
+   */
+  if (f.clientIds.length) await db.delete(exceptions).where(inArray(exceptions.clientId, f.clientIds));
+  if (stopIds.length) {
+    await db.update(runStops).set({ completedReadEventId: null }).where(inArray(runStops.id, stopIds));
+  }
+  if (meterIds.length) await db.delete(readEvents).where(inArray(readEvents.meterId, meterIds));
+  if (stopIds.length) await db.delete(runStops).where(inArray(runStops.id, stopIds));
+  if (runIds.length) await db.delete(routeRuns).where(inArray(routeRuns.id, runIds));
+  if (meterIds.length) await db.delete(meters).where(inArray(meters.id, meterIds));
+  if (f.clientIds.length) {
+    await db.delete(routes).where(inArray(routes.clientId, f.clientIds));
+    await db.delete(clients).where(inArray(clients.id, f.clientIds));
+  }
+  if (f.readerIds.length) await db.delete(users).where(inArray(users.id, f.readerIds));
+}
+
 suite('ingestion idempotency (integration)', () => {
   const { db, sql } = createDb(url ?? '');
   const svc = new IngestionService(db, new TaxonomyService(db));
 
+  const fixtures = tracker();
   afterAll(async () => {
+    await cleanup(db, fixtures);
     await sql.end();
   });
 
@@ -39,6 +99,8 @@ suite('ingestion idempotency (integration)', () => {
     const clientId = randomUUID();
     const meterId = randomUUID();
     const readerId = randomUUID();
+    fixtures.clientIds.push(clientId);
+    fixtures.readerIds.push(readerId);
     await db
       .insert(clients)
       .values({ id: clientId, name: `T-${clientId.slice(0, 8)}`, state: 'CA' });
@@ -97,7 +159,9 @@ suite('run stop read of record (integration)', () => {
   const { db, sql } = createDb(url ?? '');
   const svc = new IngestionService(db, new TaxonomyService(db));
 
+  const fixtures = tracker();
   afterAll(async () => {
+    await cleanup(db, fixtures);
     await sql.end();
   });
 
@@ -109,6 +173,8 @@ suite('run stop read of record (integration)', () => {
     const runId = randomUUID();
     const stopId = randomUUID();
 
+    fixtures.clientIds.push(clientId);
+    fixtures.readerIds.push(readerId);
     await db.insert(clients).values({ id: clientId, name: `T-${clientId.slice(0, 8)}`, state: 'CA' });
     await db.insert(routes).values({ id: routeId, clientId, name: 'R1' });
     await db.insert(meters).values({
@@ -217,7 +283,9 @@ suite('skip evidence and review (integration)', () => {
   const env = { APP_TIMEZONE: 'America/Los_Angeles' } as never;
   const svc = new RunsService(db, env, audit, new TaxonomyService(db));
 
+  const fixtures = tracker();
   afterAll(async () => {
+    await cleanup(db, fixtures);
     await sql.end();
   });
 
@@ -228,6 +296,8 @@ suite('skip evidence and review (integration)', () => {
     const readerId = randomUUID();
     const runId = randomUUID();
     const stopId = randomUUID();
+    fixtures.clientIds.push(clientId);
+    fixtures.readerIds.push(readerId);
     await db.insert(clients).values({ id: clientId, name: `T-${clientId.slice(0, 8)}`, state: 'CA' });
     await db.insert(routes).values({ id: routeId, clientId, name: 'R1' });
     await db.insert(meters).values({

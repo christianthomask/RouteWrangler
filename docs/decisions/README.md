@@ -32,3 +32,4 @@ sprint that makes a non-obvious choice adds one.
 | [022](./ADR-022-self-hosted-basemap.md) | Real basemap via self-hosted PMTiles + MapLibre, offline per route |
 | [023](./ADR-023-billing-export.md) | Billing export: snapshot per client + cycle |
 | [024](./ADR-024-staff-directory-port.md) | Staff administration via a directory port; identity stays with the IdP (extends 015) |
+| [025](./ADR-025-skips-carry-evidence.md) | A skip carries evidence, and an exception may hang off a stop (extends 003) |

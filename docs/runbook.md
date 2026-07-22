@@ -161,6 +161,18 @@ wrangler secret put CLERK_WEBHOOK_SECRET   # Svix secret for POST /webhooks/cler
 wrangler secret put CLERK_SECRET_KEY       # sk_... — lets Admin → Staff invite people (ADR-024)
 wrangler secret put CLERK_ORGANIZATION_ID  # org_... — the org invitations are sent into
 ```
+
+Two operational notes:
+
+- **`APP_TIMEZONE`** is a non-secret var (`wrangler.jsonc`), not a secret. It
+  defaults to `America/Los_Angeles` and is only the default for *new* clients —
+  each client carries its own `clients.timezone`, which is what actually decides
+  run dates, "today", aging and export dates (see `apps/api/src/config/clock.ts`).
+- **Admin → Staff needs the two Clerk values above.** Without them the API
+  resolves the `local` staff adapter, which is refused outside development, so
+  creating staff returns a labeled 400 rather than minting an account nobody
+  could sign in as. Roles and deactivation still work; only invitations need Clerk.
+
 Non-secret, non-identifying vars are committed in `apps/api/wrangler.jsonc`
 (`AUTH_PROVIDER=oidc`, `STORAGE_PROVIDER=s3`, `S3_BUCKET=verameter-photos`,
 `S3_FORCE_PATH_STYLE=true`, `AWS_REGION=auto`, `NODE_ENV=production`). Issuer,
