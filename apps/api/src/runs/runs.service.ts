@@ -18,6 +18,9 @@ import type {
   SplitRequest,
 } from '@routewrangler/contracts';
 import { DB } from '../db/db.module';
+import { ENV } from '../config/env.module';
+import type { Env } from '../config/env';
+import { todayIn } from '../config/clock';
 import type { Database } from '../db/client';
 import {
   clients,
@@ -43,6 +46,7 @@ import { validateSplit, type StopLite } from './split';
 export class RunsService {
   constructor(
     @Inject(DB) private readonly db: Database,
+    @Inject(ENV) private readonly env: Env,
     private readonly audit: AuditService,
   ) {}
 
@@ -158,7 +162,7 @@ export class RunsService {
     const [route] = await this.db.select().from(routes).where(eq(routes.id, req.routeId)).limit(1);
     if (!route) throw new NotFoundException('route not found');
 
-    const runDate = req.runDate ?? new Date().toISOString().slice(0, 10);
+    const runDate = req.runDate ?? todayIn(this.env.APP_TIMEZONE);
     const cycleId = req.cycleId ?? currentCycleId(new Date(runDate));
     const runId = randomUUID();
 

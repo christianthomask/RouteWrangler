@@ -9,7 +9,15 @@ import {
 } from '@routewrangler/contracts';
 import { DB } from '../db/db.module';
 import type { Database } from '../db/client';
-import { clients, exceptions, exceptionTypes, meters, readEvents, severities } from '../db/schema';
+import {
+  clients,
+  exceptions,
+  exceptionTypes,
+  meters,
+  readEvents,
+  severities,
+  users,
+} from '../db/schema';
 import { STORAGE, type StoragePort } from '../storage/storage.port';
 
 const PHOTO_URL_TTL = 900;
@@ -90,7 +98,15 @@ export class MetersService {
     };
   }
 
+  // NOTE: duplicated from ExceptionsService.toReadView — the two drifted once
+  // already. Worth extracting to a shared mapper.
   private async toReadView(r: typeof readEvents.$inferSelect): Promise<ReadEventView> {
+    const [reader] = await this.db
+      .select({ name: users.displayName })
+      .from(users)
+      .where(eq(users.id, r.readerId))
+      .limit(1);
+
     let photoUrl: string | null = null;
     if (r.photoKey && this.storage.configured) {
       try {
@@ -103,6 +119,8 @@ export class MetersService {
       id: r.id,
       value: r.value,
       consumption: r.consumption,
+      readerId: r.readerId,
+      readerName: reader?.name ?? null,
       capturedAt: r.capturedAt.toISOString(),
       receivedAt: r.receivedAt.toISOString(),
       sourceType: r.sourceType,

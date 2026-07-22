@@ -51,7 +51,10 @@ function overlay(stops: MapStop[], currentId?: string, nextId?: string) {
           color: isCur ? BRAND : isNext ? '#ffffff' : TONE_COLOR[s.tone],
           radius: isCur ? 9 : isNext ? 7 : 5,
           stroke: isNext ? BRAND : '#ffffff',
-          label: isCur ? 'You' : isNext ? 'Next' : '',
+          // "Current", not "You" — this marks the stop being worked, not the
+          // reader's own position. Unlabelled stops carry their sequence number
+          // so reading order is legible without a GPS fix.
+          label: isCur ? 'Current' : isNext ? 'Next' : `#${s.sequence + 1}`,
         },
       };
     }),

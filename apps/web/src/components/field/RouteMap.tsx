@@ -156,17 +156,25 @@ export function RouteMap({
               stroke={isNext ? 'var(--rw-brand)' : 'var(--rw-surface)'}
               strokeWidth={isNext ? 2 : 1.5}
             />
-            {(isCur || isNext || focus === 'current') && (
-              <text
-                y={-r - 4}
-                textAnchor="middle"
-                fontSize={11}
-                fontWeight={600}
-                fill="var(--rw-text-secondary)"
-              >
-                {isCur ? 'You' : isNext ? 'Next' : `#${p.stop.sequence + 1}`}
-              </text>
-            )}
+            {/*
+              * Every stop is labelled, not only the current and next ones. In
+              * route focus the run-detail map rendered a single label over a
+              * field of identical dots, so a reader could not tell reading order
+              * or which dot was which stop.
+              *
+              * "Current" rather than "You": this marks the stop being worked,
+              * not the reader's position — misleading on a screen that may also
+              * be reporting GPS as denied.
+              */}
+            <text
+              y={-r - 4}
+              textAnchor="middle"
+              fontSize={11}
+              fontWeight={600}
+              fill="var(--rw-text-secondary)"
+            >
+              {isCur ? 'Current' : isNext ? 'Next' : `#${p.stop.sequence + 1}`}
+            </text>
           </g>
         );
       })}

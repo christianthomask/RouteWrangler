@@ -64,6 +64,14 @@ export const ReadEventViewSchema = z.object({
   lng: z.number().nullable(),
   billable: z.boolean(),
   annotations: z.record(z.unknown()),
+  /**
+   * Who took the read. Whether to believe a reading depends heavily on this —
+   * a brand-new reader with a handful of lifetime reads whose device had GPS
+   * denied is decisive context, and the detail screen previously had no way to
+   * show it.
+   */
+  readerId: z.string().uuid().nullable(),
+  readerName: z.string().nullable(),
   /** Reader's note captured with the read, if any. */
   note: z.string().nullable(),
   /** Presigned GET URL for the photo, when one is attached and storage is up. */

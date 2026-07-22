@@ -1,17 +1,24 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, countDistinct, eq } from 'drizzle-orm';
 import type { RosterReader } from '@routewrangler/contracts';
 import { DB } from '../db/db.module';
+import { ENV } from '../config/env.module';
+import type { Env } from '../config/env';
+import { todayIn } from '../config/clock';
+import { rateOf } from '../exceptions/lifecycle';
 import type { Database } from '../db/client';
 import { exceptions, readEvents, routeRuns, runStops, users } from '../db/schema';
 
 /** Roster — readers as entities (BUILD_SPEC §7.3). */
 @Injectable()
 export class RosterService {
-  constructor(@Inject(DB) private readonly db: Database) {}
+  constructor(
+    @Inject(DB) private readonly db: Database,
+    @Inject(ENV) private readonly env: Env,
+  ) {}
 
   async list(): Promise<RosterReader[]> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayIn(this.env.APP_TIMEZONE);
     const readers = await this.db
       .select({ id: users.id, name: users.displayName })
       .from(users)
@@ -24,14 +31,21 @@ export class RosterService {
         (x) => [x.r, x.n],
       ),
     );
+    // `n` is the true exception total; `flagged` counts distinct reads that
+    // raised at least one, which is what the rate divides by — a single reading
+    // can raise both a leak spike and a location-absent (see rateOf).
     const exs = new Map(
       (
         await this.db
-          .select({ r: readEvents.readerId, n: count() })
+          .select({
+            r: readEvents.readerId,
+            n: count(),
+            flagged: countDistinct(exceptions.readEventId),
+          })
           .from(exceptions)
           .innerJoin(readEvents, eq(exceptions.readEventId, readEvents.id))
           .groupBy(readEvents.readerId)
-      ).map((x) => [x.r, x.n]),
+      ).map((x) => [x.r, x]),
     );
 
     const out: RosterReader[] = [];
@@ -56,7 +70,7 @@ export class RosterService {
       }
 
       const reads_ = reads.get(r.id) ?? 0;
-      const ex_ = exs.get(r.id) ?? 0;
+      const ex_ = exs.get(r.id);
       out.push({
         readerId: r.id,
         name: r.name,
@@ -64,8 +78,8 @@ export class RosterService {
         openRuns: todayRuns.filter((x) => x.status === 'open').length,
         completionRate: total ? Math.round((read / total) * 100) : 0,
         reads: reads_,
-        exceptions: ex_,
-        exceptionRate: reads_ ? Math.round((ex_ / reads_) * 100) / 100 : 0,
+        exceptions: ex_?.n ?? 0,
+        exceptionRate: rateOf(ex_?.flagged ?? 0, reads_),
       });
     }
     return out;

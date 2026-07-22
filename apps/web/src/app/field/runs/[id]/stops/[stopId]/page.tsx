@@ -43,9 +43,23 @@ export default function CapturePage() {
   const [skipping, setSkipping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /**
+   * A stop that has already been read shows its captured value rather than an
+   * empty form. Re-arming the form made a completed stop look untouched, and a
+   * second submit is a *new* read event (ADR-008 keys idempotency on a
+   * client-generated id, so it is not a duplicate) — which differences against
+   * the first, lands at consumption 0, and reads as clean even when the first
+   * read was flagged. Correcting a read is still possible, but has to be
+   * deliberate.
+   */
+  const [recapture, setRecapture] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const stop = useMemo(() => run?.stops.find((x) => x.id === stopId) ?? null, [run, stopId]);
+
+  useEffect(() => {
+    setRecapture(false);
+  }, [stopId]);
 
   // Ordered stops → previous/next by sequence for step-through navigation.
   const ordered = useMemo(
@@ -309,11 +323,58 @@ export default function CapturePage() {
             Cancel
           </button>
         </div>
+      ) : stop.status !== 'pending' && !recapture ? (
+        <div
+          className="rw-card"
+          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-3)' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--rw-space-2)' }}>
+            <span
+              style={{
+                color: stop.status === 'read' ? 'var(--rw-success)' : 'var(--rw-warning)',
+                fontWeight: 'var(--rw-weight-semibold)',
+              }}
+            >
+              {stop.status === 'read' ? 'Read captured' : 'Stop skipped'}
+            </span>
+          </div>
+          {stop.status === 'read' && (
+            <p className="tabular" style={{ fontSize: 'var(--rw-text-2xl)', fontWeight: 600, margin: 0 }}>
+              {stop.lastValue ?? '—'}
+            </p>
+          )}
+          <p style={{ fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)', margin: 0 }}>
+            You&apos;ve already done this stop. Only capture again if the reading above is wrong —
+            it records a new read, it does not replace the old one.
+          </p>
+          <button
+            className="rw-button rw-button--ghost"
+            style={{ width: '100%' }}
+            onClick={() => setRecapture(true)}
+          >
+            Re-capture reading
+          </button>
+        </div>
       ) : (
         <div
           className="rw-card"
           style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-4)' }}
         >
+          {recapture && (
+            <p
+              style={{
+                fontSize: 'var(--rw-text-sm)',
+                color: 'var(--rw-warning)',
+                background: 'var(--rw-surface-2)',
+                border: '1px solid var(--rw-border)',
+                borderRadius: 'var(--rw-radius)',
+                padding: '0.6rem 0.75rem',
+                margin: 0,
+              }}
+            >
+              Re-capturing — this adds a second read for this stop.
+            </p>
+          )}
           <label>
             <span className="rw-label">Meter reading</span>
             <input

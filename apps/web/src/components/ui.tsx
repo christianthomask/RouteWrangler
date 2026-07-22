@@ -92,3 +92,15 @@ export function relativeTime(iso: string): string {
 export function num(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString();
 }
+
+/**
+ * Formats a 0–1 ratio as a percentage, keeping one decimal below 10% so a small
+ * but non-zero rate doesn't render as a flat "0%". Rounding to whole points at
+ * both ends of the wire — API and UI — collapsed everything under 0.5%.
+ */
+export function formatRate(ratio: number | null | undefined): string {
+  if (ratio == null) return '—';
+  const pct = ratio * 100;
+  if (pct > 0 && pct < 10) return `${Math.round(pct * 10) / 10}%`;
+  return `${Math.round(pct)}%`;
+}

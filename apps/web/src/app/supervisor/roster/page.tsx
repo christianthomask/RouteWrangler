@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { RosterReader } from '@routewrangler/contracts';
 import { fetchRoster } from '@/lib/api';
-import { EmptyState, Loading, num } from '@/components/ui';
+import { EmptyState, Loading, formatRate, num } from '@/components/ui';
 
 export default function RosterPage() {
   const [readers, setReaders] = useState<RosterReader[] | null>(null);
@@ -42,10 +42,16 @@ export default function RosterPage() {
                     {r.todaysRuns} run{r.todaysRuns === 1 ? '' : 's'} today · {r.completionRate}%
                   </span>
                 </div>
+                {/*
+                  * Explicitly scoped. The runs/completion figures above are
+                  * today's; these three are all-time. Unlabelled and side by
+                  * side, "720 reads" read as a count for today — impossible next
+                  * to a 0% completion rate for the same reader.
+                  */}
                 <div className="rw-row__meta tabular">
-                  <span>{num(r.reads)} reads</span>
+                  <span>{num(r.reads)} reads all time</span>
                   <span>{num(r.exceptions)} exceptions</span>
-                  <span>{Math.round(r.exceptionRate * 100)}% rate</span>
+                  <span>{formatRate(r.exceptionRate)} of reads flagged</span>
                 </div>
               </div>
             ))}

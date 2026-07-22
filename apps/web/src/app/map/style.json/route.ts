@@ -19,10 +19,28 @@ const SOURCE = 'protomaps';
 const ATTRIBUTION =
   '<a href="https://github.com/protomaps/basemaps">Protomaps</a> © <a href="https://osm.org/copyright">OpenStreetMap</a>';
 
+/**
+ * The origin the *client* actually used, so every asset URL in the style stays
+ * same-origin.
+ *
+ * `new URL(req.url).origin` is not that: the dev server normalizes it to its own
+ * configured hostname, so a browser on http://127.0.0.1:3000 was handed
+ * http://localhost:3000 tile, glyph and sprite URLs and every one of them failed
+ * CORS — the basemap silently fell back to the plain SVG plot. The Host header
+ * is what the client sent; x-forwarded-* wins behind a proxy or CDN.
+ */
+function originOf(req: Request): string {
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
+  if (!host) return new URL(req.url).origin;
+  const proto =
+    req.headers.get('x-forwarded-proto') ?? new URL(req.url).protocol.replace(':', '');
+  return `${proto}://${host}`;
+}
+
 export async function GET(req: Request): Promise<Response> {
-  // Derive the origin from the request so the style works on localhost, on
-  // preview deploys and in production without a build-time env var.
-  const origin = new URL(req.url).origin;
+  // Derived per-request so the style works on localhost, on preview deploys and
+  // in production without a build-time env var.
+  const origin = originOf(req);
 
   const style = {
     version: 8,
@@ -48,6 +66,12 @@ export async function GET(req: Request): Promise<Response> {
       // Short-lived: the style embeds the request origin and is cheap to rebuild,
       // but the SW still caches it for offline launches.
       'Cache-Control': 'public, max-age=3600',
+      // The body varies by Host — tile, glyph and sprite URLs are built from the
+      // request origin. Without this, a shared cache keyed on path alone can
+      // serve one hostname's style to another, and every asset then fails CORS.
+      // Matters wherever the app answers on more than one name (apex and www, a
+      // preview domain alongside the custom one).
+      Vary: 'Host',
     },
   });
 }

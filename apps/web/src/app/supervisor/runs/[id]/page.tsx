@@ -17,7 +17,16 @@ export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [readers, setReaders] = useState<RosterReader[]>([]);
+  /**
+   * Two separate error states, matching the exception detail page.
+   * `error` means the run could not be loaded and there is nothing to show;
+   * `actionError` means a reassign/release/split was rejected while the run is
+   * still perfectly good. Collapsing them replaced the whole screen — stop list,
+   * selection and both action panels — on any failed action, which left no way
+   * back except navigating away and starting over.
+   */
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reassignTo, setReassignTo] = useState('');
@@ -49,6 +58,20 @@ export default function RunDetailPage() {
   const started = run.stops.some((s) => s.status !== 'pending');
   const pending = run.stops.filter((s) => s.status === 'pending');
 
+  /*
+   * The server enforces the split invariant (ADR-005), but it is knowable here:
+   * we already hold every stop's sequence. Checking it client-side turns a 400
+   * into a disabled button and an inline reason, instead of letting the
+   * supervisor build an invalid selection and only learn on submit.
+   */
+  const selectedSeqs = run.stops
+    .filter((s) => selected.has(s.id))
+    .map((s) => s.sequence)
+    .sort((a, b) => a - b);
+  const contiguous =
+    selectedSeqs.length === 0 ||
+    selectedSeqs[selectedSeqs.length - 1]! - selectedSeqs[0]! === selectedSeqs.length - 1;
+
   function toggle(stopId: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -61,12 +84,12 @@ export default function RunDetailPage() {
   async function doReassign() {
     if (!reassignTo) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       setRun(await reassignRun(id, reassignTo));
       setMsg(`Reassigned to ${readerName(reassignTo)}.`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'reassign failed');
+      setActionError(e instanceof Error ? e.message : 'reassign failed');
     } finally {
       setBusy(false);
     }
@@ -74,13 +97,13 @@ export default function RunDetailPage() {
 
   async function doRelease() {
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       setRun(await reassignRun(id, null));
       setReassignTo('');
       setMsg('Run released — it is now unassigned.');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'release failed');
+      setActionError(e instanceof Error ? e.message : 'release failed');
     } finally {
       setBusy(false);
     }
@@ -89,14 +112,16 @@ export default function RunDetailPage() {
   async function doSplit() {
     if (!splitTo || selected.size === 0) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       const updated = await splitRun(id, { toReaderId: splitTo, stopIds: [...selected] });
       setRun(updated);
       setMsg(`Split ${selected.size} stop${selected.size === 1 ? '' : 's'} to ${readerName(splitTo)}.`);
       setSelected(new Set());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'split failed — stops must be a contiguous pending range');
+      setActionError(
+        e instanceof Error ? e.message : 'split failed — stops must be a contiguous pending range',
+      );
     } finally {
       setBusy(false);
     }
@@ -126,7 +151,11 @@ export default function RunDetailPage() {
           <span style={{ color: 'var(--rw-success)', fontWeight: 600, fontSize: 'var(--rw-text-sm)' }}>{msg}</span>
         </div>
       )}
-      {error && <div className="rw-card"><span style={{ color: 'var(--rw-danger)', fontSize: 'var(--rw-text-sm)' }}>{error}</span></div>}
+      {actionError && (
+        <div className="rw-card" style={{ borderColor: 'var(--rw-danger)' }}>
+          <span style={{ color: 'var(--rw-danger)', fontSize: 'var(--rw-text-sm)' }}>{actionError}</span>
+        </div>
+      )}
 
       <div className="rw-split">
         <section className="rw-card" style={{ padding: 0 }}>
@@ -162,7 +191,18 @@ export default function RunDetailPage() {
                 ))}
               </select>
             </label>
-            <button className="rw-button" style={{ marginTop: 'var(--rw-space-3)' }} disabled={busy || !splitTo || selected.size === 0} onClick={doSplit}>
+            {!contiguous && (
+              <p style={{ color: 'var(--rw-danger)', fontSize: 'var(--rw-text-sm)', margin: '0 0 var(--rw-space-2)' }}>
+                Stops {selectedSeqs[0]! + 1}–{selectedSeqs[selectedSeqs.length - 1]! + 1} aren&apos;t a
+                contiguous range. Select an unbroken run of pending stops.
+              </p>
+            )}
+            <button
+              className="rw-button"
+              style={{ marginTop: 'var(--rw-space-3)' }}
+              disabled={busy || !splitTo || selected.size === 0 || !contiguous}
+              onClick={doSplit}
+            >
               Split {selected.size || ''} to reader
             </button>
           </section>

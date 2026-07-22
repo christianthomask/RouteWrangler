@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, gte, lt, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, notInArray, sql } from 'drizzle-orm';
 import {
   DEFAULT_VALIDATION_CONFIG,
   type ExceptionCode,
@@ -28,6 +28,7 @@ import {
   routeRuns,
   runStops,
   severities,
+  users,
 } from '../db/schema';
 import { STORAGE, type StoragePort } from '../storage/storage.port';
 import { AuditService } from '../audit/audit.service';
@@ -194,6 +195,12 @@ export class ExceptionsService {
   }
 
   private async toReadView(r: typeof readEvents.$inferSelect): Promise<ReadEventView> {
+    const [reader] = await this.db
+      .select({ name: users.displayName })
+      .from(users)
+      .where(eq(users.id, r.readerId))
+      .limit(1);
+
     let photoUrl: string | null = null;
     if (r.photoKey && this.storage.configured) {
       try {
@@ -213,6 +220,8 @@ export class ExceptionsService {
       lng: r.lng,
       billable: r.billable,
       annotations: (r.annotations ?? {}) as Record<string, unknown>,
+      readerId: r.readerId,
+      readerName: reader?.name ?? null,
       note: r.note ?? null,
       photoUrl,
     };
@@ -236,6 +245,12 @@ export class ExceptionsService {
     this.ensureNotTerminal(ex.status);
     if (ex.rereadCount >= MAX_REREADS) {
       throw new ConflictException('reread cap reached — override or escalate');
+    }
+    if (await this.hasOutstandingReread(id)) {
+      // Without this, clicking twice dispatches two identical tasks to the
+      // reader's Rereads tab with nothing to tell them apart, and they walk the
+      // meter a second time for a job already in hand.
+      throw new ConflictException('a reread is already outstanding for this exception');
     }
     const readerId = (await this.flaggedReader(ex.readEventId)) ?? actorId;
 
@@ -266,6 +281,12 @@ export class ExceptionsService {
             eq(exceptions.id, id),
             notInArray(exceptions.status, TERMINAL_STATUSES),
             lt(exceptions.rereadCount, MAX_REREADS),
+            // Same condition as the fast-path check above, restated as a
+            // predicate so two concurrent orders cannot both pass it.
+            sql`NOT EXISTS (
+              SELECT 1 FROM reread_tasks rt
+              WHERE rt.exception_id = ${id} AND rt.status IN ('issued', 'delivered')
+            )`,
           ),
         )
         .returning({ id: exceptions.id });
@@ -358,6 +379,21 @@ export class ExceptionsService {
       meta: { note: req.note, certifiedReadEventId: certified },
     });
     return this.detail(id);
+  }
+
+  /** A task the reader still has in hand — issued, or delivered but not done. */
+  private async hasOutstandingReread(exceptionId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: rereadTasks.id })
+      .from(rereadTasks)
+      .where(
+        and(
+          eq(rereadTasks.exceptionId, exceptionId),
+          inArray(rereadTasks.status, ['issued', 'delivered']),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
   }
 
   private async flaggedReader(readEventId: string): Promise<string | null> {

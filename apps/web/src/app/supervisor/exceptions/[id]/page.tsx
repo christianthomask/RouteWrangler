@@ -53,6 +53,7 @@ export default function ExceptionDetailPage() {
           <section className="rw-card">
             <h2 style={cardTitle}>Consumption — last 12 months</h2>
             <ConsumptionChart points={d.consumptionSeries} flaggedSeverity={d.severityCode} />
+            <ReadingInContext detail={d} />
           </section>
 
           <section className="rw-card">
@@ -177,10 +178,21 @@ function ActionBar({ detail, onDone }: { detail: ExceptionDetail; onDone: (d: Ex
       </label>
       {err && <p style={{ color: 'var(--rw-danger)', fontSize: 'var(--rw-text-sm)', margin: '8px 0 0' }}>{err}</p>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-2)', marginTop: 'var(--rw-space-3)' }}>
-        {allow.includes('reread') && (
+        {allow.includes('reread') ? (
           <button className="rw-button" disabled={busy} onClick={() => run(() => orderReread(detail.id, note || undefined), false)}>
             Order reread ({detail.rereadCount}/2)
           </button>
+        ) : (
+          /*
+           * At the cap the button used to disappear outright, so a supervisor
+           * returning to a case simply found the option gone with no reason.
+           * Show it disabled and say why instead.
+           */
+          detail.rereadCount >= 2 && (
+            <button className="rw-button" disabled title="Two rereads have already been ordered">
+              Reread limit reached (2/2)
+            </button>
+          )
         )}
         {allow.includes('resolve') && (
           <button className="rw-button rw-button--ghost" style={{ width: '100%' }} disabled={busy}
@@ -206,3 +218,79 @@ function ActionBar({ detail, onDone }: { detail: ExceptionDetail; onDone: (d: Ex
 }
 
 const cardTitle: React.CSSProperties = { fontSize: 'var(--rw-text-sm)', fontWeight: 600, margin: '0 0 var(--rw-space-3)', color: 'var(--rw-text-secondary)' };
+
+
+/**
+ * The numbers a supervisor needs to decide whether to believe a read, all
+ * derived from the series already on the payload.
+ *
+ * The screen used to show the entered value and the consumption but never the
+ * *previous* read — so checking the arithmetic meant subtracting by hand — and
+ * named the severity without ever saying what normal looked like or by how much
+ * this read missed it. "Critical" is a conclusion; this is the evidence.
+ */
+function ReadingInContext({ detail }: { detail: ExceptionDetail }) {
+  const series = detail.consumptionSeries;
+  const flaggedAt = series.findIndex((p) => p.flagged);
+  const previous = flaggedAt > 0 ? series[flaggedAt - 1] : undefined;
+
+  const priorConsumption = series
+    .filter((p, i) => !p.flagged && i < (flaggedAt === -1 ? series.length : flaggedAt))
+    .map((p) => p.consumption)
+    .filter((c): c is number => c != null);
+
+  const baseline = priorConsumption.length
+    ? priorConsumption.reduce((a, b) => a + b, 0) / priorConsumption.length
+    : null;
+
+  const flagged = detail.flaggedRead;
+  // Only meaningful against a positive baseline; a decrease is a different story
+  // that the type code (negative consumption / rollover) already tells.
+  const multiple =
+    baseline && baseline > 0 && flagged.consumption != null && flagged.consumption > 0
+      ? flagged.consumption / baseline
+      : null;
+
+  const items: Array<{ label: string; value: string }> = [
+    { label: 'Previous read', value: previous ? num(previous.value) : '—' },
+    { label: 'This read', value: num(flagged.value) },
+    { label: 'Consumption', value: flagged.consumption == null ? '—' : num(flagged.consumption) },
+    {
+      label: `Typical (${priorConsumption.length} mo)`,
+      value: baseline == null ? '—' : num(Math.round(baseline)),
+    },
+  ];
+
+  return (
+    <div style={{ marginTop: 'var(--rw-space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-3)' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(7rem, 1fr))',
+          gap: 'var(--rw-space-3)',
+        }}
+      >
+        {items.map((it) => (
+          <div key={it.label}>
+            <div className="rw-label">{it.label}</div>
+            <div className="tabular" style={{ fontSize: 'var(--rw-text-lg)', fontWeight: 'var(--rw-weight-semibold)' }}>
+              {it.value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {multiple != null && multiple >= 2 && (
+        <p style={{ margin: 0, fontSize: 'var(--rw-text-sm)', color: 'var(--rw-danger)' }}>
+          {multiple >= 10 ? Math.round(multiple) : Math.round(multiple * 10) / 10}× the typical
+          monthly consumption for this meter.
+        </p>
+      )}
+
+      <p style={{ margin: 0, fontSize: 'var(--rw-text-sm)', color: 'var(--rw-text-muted)' }}>
+        Read by {flagged.readerName ?? 'an unknown reader'}
+        {flagged.lat == null || flagged.lng == null ? ' · no GPS captured' : ''}
+      </p>
+    </div>
+  );
+}

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Dashboard } from '@routewrangler/contracts';
 import { fetchDashboard } from '@/lib/api';
-import { SeverityChip, StatTile, EmptyState, Loading, num } from '@/components/ui';
+import { SeverityChip, StatTile, EmptyState, Loading, formatRate, num } from '@/components/ui';
 import type { SeverityCode } from '@/design/tokens';
 
 const SEV_ORDER: SeverityCode[] = ['critical', 'high', 'medium', 'low'];
@@ -92,7 +92,7 @@ export default function DashboardPage() {
                 <div className="rw-row__top">
                   <strong>{r.readerName}</strong>
                   <span className="tabular" style={{ color: 'var(--rw-text-muted)' }}>
-                    {Math.round(r.exceptionRate * 100)}% exc. rate
+                    {formatRate(r.exceptionRate)} of reads flagged
                   </span>
                 </div>
                 <div className="rw-row__meta tabular">
