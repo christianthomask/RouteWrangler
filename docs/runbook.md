@@ -1,10 +1,14 @@
 # RouteWrangler — Runbook
 
 Operational steps for running and provisioning RouteWrangler. **The cloud target
-is a config choice, not a code change (ADR-015):** the app runs against AWS,
-Azure, or a fully local stack by setting `AUTH_PROVIDER` / `STORAGE_PROVIDER` and
-`DATABASE_URL`. IaC is deferred (Nice queue §12); provisioning below is manual
-and documented step by step.
+is a config choice, not a code change (ADR-015):** the app runs against
+Cloudflare, AWS, Azure, or a fully local stack by setting `AUTH_PROVIDER` /
+`STORAGE_PROVIDER` and `DATABASE_URL`. **Cloudflare is the chosen target**
+(ADR-019). There is no IaC; provisioning below is manual and documented step by
+step.
+
+Build state — what is shipped, verified, or still open — lives in
+[`docs/STATUS.md`](./STATUS.md).
 
 ## Portability map (ADR-015)
 
@@ -61,67 +65,12 @@ SIM_READER_SUB='local-only:reader1' pnpm --filter @routewrangler/simulator playb
 
 ---
 
-## 1. Pricing verification (Sprint 0 — DO THIS BEFORE PROVISIONING)
+## 1. Deploy — Cloudflare target (ADR-019)
 
-Target idle footprint ≈ **$5–15/mo**. Verify current terms and record the
-result in `docs/questions.md` for CTK sign-off **before** creating paid
-resources. Flag to CTK if reality disagrees with the table below.
-
-| Component | Idle cost driver | What to verify | Est. idle |
-| --- | --- | --- | --- |
-| App Runner | pause-when-idle / min instances | Confirm you can scale the service to **0 provisioned** (or use pause); an always-warm min instance is the main idle-cost risk | ~$0 paused, else ~$5–7/mo per 0.25 vCPU warm |
-| Aurora Serverless v2 | min ACUs; **scale-to-zero** | Confirm scale-to-zero (auto-pause to 0 ACU) is available in the chosen region and the resume latency is acceptable | ~$0 paused; ~$0.06/ACU-hr when active |
-| S3 | storage + requests | Negligible at demo volume | < $1/mo |
-| Cognito | MAU free tier | Confirm current free-tier MAU allowance covers the seed roster + demo | $0 within free tier |
-| Vercel | hobby/pro | Confirm the plan covers one app | $0 hobby |
-
-> The numbers above are **estimates to be confirmed against live pricing at
-> provisioning time**, not quotes. Do not provision until this table is
-> confirmed and logged.
-
----
-
-## 2. Provisioning (dev, then prod) — manual, per environment
-
-Do this once per environment (`dev`, then `prod`). Record IDs/ARNs in the
-environment's secret store; never commit them.
-
-### 2.1 Cognito user pool
-1. Create a user pool (custom UI — hosted UI not required).
-2. Create an app client (no client secret for the SPA; enable
-   `USER_SRP_AUTH`).
-3. Create three groups: `reader`, `supervisor`, `admin`.
-4. Record `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, `AWS_REGION`.
-5. Fill `.env` (API) and `NEXT_PUBLIC_COGNITO_*` (web). Re-run `pnpm seed`
-   with AWS creds present to provision pool users and link local rows.
-
-### 2.2 Aurora Serverless v2 (PostgreSQL)
-1. Create an Aurora PostgreSQL cluster, Serverless v2, min capacity set to allow
-   **scale-to-zero**; note the writer endpoint.
-2. Set `DATABASE_URL` in the environment secret store.
-3. Run `pnpm db:migrate` against it.
-
-### 2.3 S3
-1. Create a private bucket for photos + export files.
-2. Grant the API's role `PutObject`/`GetObject` (presigned URLs only).
-3. Set `S3_BUCKET`.
-
-### 2.4 App Runner (API)
-1. Deploy `apps/api` (container). Configure env from the secret store.
-2. Health check path: `/health`.
-3. Confirm the idle/pause behaviour matches §1.
-
-### 2.5 Vercel (web)
-1. Import `apps/web`. Set `NEXT_PUBLIC_API_BASE_URL` and `NEXT_PUBLIC_COGNITO_*`.
-2. Deploy; verify the branded login renders and `/me` round-trips.
-
----
-
-## 2a. Deploy — Cloudflare target (ADR-019)
-
-Deploys run in **GitHub Actions** (`.github/workflows/deploy.yml`, manual
-`workflow_dispatch`) or from a local Claude Code instance with `wrangler login` —
-never from the remote Claude Code session (it can't reach Cloudflare).
+Deploys run in **GitHub Actions** (`.github/workflows/deploy.yml`) — automatically
+on green CI for `main`, or via manual `workflow_dispatch` (see *Deploy* below).
+They can also be run from a local machine with `wrangler login`, but never from a
+remote Claude Code session, whose egress proxy blocks `*.cloudflare.com`.
 
 ### One-time provisioning (from local CC or the Cloudflare dashboard)
 1. **Neon** — create a Postgres project; copy the direct (non-pooled) connection
@@ -202,7 +151,7 @@ migrations against an unchanged tree — dispatch **Deploy (Cloudflare)** manual
 
 ---
 
-## 2b. Provisioning — Azure target (ADR-015)
+## 2. Provisioning — Azure target (ADR-015)
 
 Same app, different provider config. Verify Azure pricing before provisioning
 (free account: $200/30-day credit + 12-month free tiers; Container Apps consumption
@@ -217,7 +166,7 @@ scales to zero). **Note:** Azure sign-up also requires a verifiable card.
 3. **Storage — Azure Blob.** Create a storage account + a `photos` container.
    Set `STORAGE_PROVIDER=azure_blob`, `AZURE_STORAGE_ACCOUNT`,
    `AZURE_STORAGE_CONTAINER`, `AZURE_STORAGE_ACCOUNT_KEY`. ⚠️ The Blob adapter is
-   implemented but **not yet verified against a live account** (docs/questions.md).
+   implemented but **not yet verified against a live account** (docs/STATUS.md).
 4. **API — Azure Container Apps.** Deploy the `apps/api` container; env from a
    Key Vault / secret store; ingress health probe `/health`; consumption plan
    (scale-to-zero).
@@ -226,8 +175,13 @@ scales to zero). **Note:** Azure sign-up also requires a verifiable card.
 
 ---
 
-## 3. Sprint 0 demo (acceptance)
+## 3. Acceptance
 
-Visit the prod URL → branded login → sign in as the seeded supervisor
-(`jeramehl`) → authenticated hello showing the **supervisor** role.
-*"It's deployed, it's real auth, it has a name."*
+Local, end to end with no cloud vendor — the headless pipeline in §0: simulator
+→ public ingestion API → validated reads and typed exceptions in the database.
+
+Deployed: prod URL → branded login (Clerk) → role-gated `/field`, `/supervisor`
+and `/admin`, with the role resolved from the database rather than the token.
+
+Current build state, and what is verified versus merely scaffolded, is tracked
+in [`docs/STATUS.md`](./STATUS.md).

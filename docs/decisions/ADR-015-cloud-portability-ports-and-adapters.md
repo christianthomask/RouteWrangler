@@ -48,7 +48,7 @@ and keep everything else neutral.
 - Switching prod target = new config + (for Azure) a verified Blob adapter +
   IaC for that provider. No application code changes.
 - The Azure Blob adapter is implemented to the SAS contract but **not yet
-  verified against a live account** (none provisioned — see docs/questions.md);
+  verified against a live account** (none provisioned — see docs/STATUS.md);
   the S3/MinIO path is verified end to end.
 - We keep provider strengths where they don't cost portability (e.g. Aurora
   scale-to-zero remains available on the AWS target; it's just not assumed).

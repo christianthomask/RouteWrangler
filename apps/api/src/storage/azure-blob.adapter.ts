@@ -19,7 +19,7 @@ export interface AzureBlobConfig {
  * client sends it.
  *
  * NOTE: implemented to the documented SAS contract but NOT yet verified against
- * a live Azure account (no account provisioned — see docs/questions.md). The
+ * a live Azure account (no account provisioned — see docs/STATUS.md). The
  * port design means switching to Azure is config + this adapter, no app change.
  */
 export class AzureBlobStorageAdapter implements StoragePort {

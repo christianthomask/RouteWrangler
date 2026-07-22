@@ -40,4 +40,4 @@ not a formal trademark clearance). "Freshet" was the most water-evocative pick;
   "routewrangler" (no rename, no import churn).
 - If clearance surfaces a problem, the change is one line.
 - Close before public launch: trademark clearance + secure `verameter.com`
-  (tracked in docs/questions.md).
+  (tracked in docs/STATUS.md).

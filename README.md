@@ -45,7 +45,7 @@ pnpm dev            # API on :3001
 pnpm --filter @routewrangler/web dev   # web on :3000
 ```
 
-### The headless pipeline demo (Sprint 1)
+### The headless pipeline demo
 
 With the API running and `AUTH_DEV_BYPASS=true` in `.env` (local-only shim,
 ADR-012), run the simulator against the public ingestion API:
@@ -62,65 +62,55 @@ dependency (ADR-015): auth, object storage, and the database each sit behind a
 port, selected by `AUTH_PROVIDER` / `STORAGE_PROVIDER` / `DATABASE_URL`. The
 default `.env` runs everything locally — docker Postgres, **MinIO** (S3-compatible
 storage, identical presign flow to AWS S3), and the dev-auth shim (ADR-012,
-hard-disabled in production). Point the same build at **AWS** (Cognito · Aurora ·
-S3) or **Azure** (Entra · Azure PG · Blob) later by changing config only — see
-the portability map in `docs/runbook.md`.
+hard-disabled in production). Point the same build at **Cloudflare** (Clerk ·
+Neon · R2 · Workers), **AWS** (Cognito · Aurora · S3) or **Azure** (Entra ·
+Azure PG · Blob) by changing config only — see the portability map in
+`docs/runbook.md`.
 
 ## What works today
 
-**Sprint 0 — walking skeleton**
-- Monorepo scaffold, shared Zod contracts, CI (build · lint · typecheck · test ·
-  migrate · migration-check).
-- NestJS API with a **real JWKS-based JWT guard** (Cognito), server-side role
-  enforcement, `/health`, and the `/me` authenticated-hello endpoint.
-- Seed that creates **both halves** (Cognito pool user + linked local row), with
-  a labeled local-only fallback.
-- Next.js app: branded login and role-gated `/field`, `/supervisor`, `/admin`
-  shells that display the authenticated role.
+Sprints 0–4 are shipped. The headline capabilities:
 
-**Sprint 1 — the headless core**
-- Full schema + migrations (clients, meters, routes, runs, immutable
-  read_events, exceptions, taxonomy lookups, exports, audit).
 - **One public ingestion API** — `POST /ingest/read-events`: idempotent on the
   client-generated event id, single or batch, per-event statuses.
 - **Validation rule registry** — one module per exception type: hi/lo vs the
-  meter's own 12-month baseline, leak-spike, negative consumption, rollover
-  (in-band annotate / out-of-band exception), zero-consumption streak,
-  location-absent, duplicate-mismatch. Passing reads marked billable.
-- `POST /photos/presign` (real S3, labeled 503 until provisioned), `GET
-  /taxonomy`, minimal `GET /runs`.
-- **Simulator** — deterministic seasonal generation + playback through the
-  public API (zero privileged access), with an anomaly matrix that trips every
-  rule. The seed backfills 12 months of history and stages today's demo run.
-- Vitest: every anomaly asserts its exception, idempotency (DB-backed), rollover
-  math, deterministic generation, storage adapters — 42 tests.
+  meter's own baseline, leak-spike, negative consumption, rollover (in-band
+  annotate / out-of-band exception), zero-consumption streak, location-absent,
+  duplicate-mismatch. Passing reads marked billable.
+- **Supervisor console** — exception queue and detail with certification, runs,
+  roster, assignment and mid-run splits, dashboard, exports.
+- **Field reader PWA** (ADR-020) — genuine offline store-and-forward: IndexedDB
+  queue, capture-order sync, exactly-once via the queue id as the server's
+  idempotency key, photo upload decoupled from read acceptance.
+- **Offline route map** (ADR-022) — self-hosted PMTiles basemap over R2 range
+  requests, pre-warmed per route, with a coordinate-plot fallback (ADR-021).
+- **Billing export** (ADR-023) — per client and cycle, snapshotted immutably and
+  re-served rather than re-rendered; supersede is transactional.
+- **Skips carry evidence** (ADR-025) — reason plus a photograph, enforced
+  server-side, raising a reviewable exception against the stop.
+- **Auth** — Clerk via a generic OIDC verifier, with roles **DB-authoritative**
+  (never read from the token) and provisioned by a signature-verified webhook.
+- **Simulator** — deterministic seasonal generation, playback through the public
+  API with zero privileged access, and an anomaly matrix that trips every rule.
 
-**Cloud portability (ADR-015)**
-- Auth and object storage sit behind ports (`TokenVerifier`, `StoragePort`);
-  Postgres + container are already neutral. Provider by config: auth
-  Cognito/Entra/OIDC, storage S3(/MinIO)/Azure Blob. The whole system runs
-  locally with **no cloud vendor**; prod target (AWS/Azure) is a config change.
+**140 tests** across API, contracts, web and simulator. CI runs build, lint,
+typecheck, migrations and the full suite against a real Postgres.
 
-**Sprint 0 demo:** prod URL → branded login → authenticated hello with role.
-*"It's deployed, it's real auth, it has a name."*
-
-**Sprint 1 demo:** simulator → public API → validated reads + typed exceptions
-in the database. *"The pipeline works end to end with no UI."*
+**Demo:** simulator → public API → validated reads + typed exceptions in the
+database. *"The pipeline works end to end with no UI."*
 
 ## Production path
 
-The cloud target is a **config choice, not a rewrite** (ADR-015). Deployment
-steps for both targets are in [`docs/runbook.md`](./docs/runbook.md) — AWS
-(Cognito · Aurora Serverless v2 · S3 · App Runner) or Azure (Entra · Azure PG ·
-Blob · Container Apps), plus the local MinIO stack. IaC is deferred and labeled
-(Nice queue, BUILD_SPEC §12). Decisions are logged in
-[`docs/decisions/`](./docs/decisions/).
+The cloud target is a **config choice, not a rewrite** (ADR-015). **Cloudflare is
+the chosen target** (ADR-019) — Workers/OpenNext for web, Containers for the API,
+Neon for Postgres, R2 for storage, Clerk for identity — deployed from GitHub
+Actions, gated on green CI. AWS and Azure remain reachable by config. Steps are
+in [`docs/runbook.md`](./docs/runbook.md).
 
 ## Where things go next
 
-Sprint 1 = the headless core (full schema, ingestion, validation rule registry,
-the simulator's seed/playback/anomaly modes) — done, along with the field PWA,
-supervisor console and billing export. Open items live in
-[`docs/questions.md`](./docs/questions.md); the reasoning behind what's built is
-in [`docs/decisions/`](./docs/decisions/) and the operational steps in
+**[`docs/STATUS.md`](./docs/STATUS.md) is the single source of truth** for what
+is built, what is verified versus merely scaffolded, and what is still open.
+Start there. The reasoning behind each choice is in
+[`docs/decisions/`](./docs/decisions/) (25 ADRs) and the operational steps are in
 [`docs/runbook.md`](./docs/runbook.md).
