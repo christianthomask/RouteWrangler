@@ -59,13 +59,13 @@ rule — with no UI. *"The pipeline works end to end with no UI."*
 
 **Runs with zero cloud signup.** The cloud is a config choice, not a code
 dependency (ADR-015): auth, object storage, and the database each sit behind a
-port, selected by `AUTH_PROVIDER` / `STORAGE_PROVIDER` / `DATABASE_URL`. The
-default `.env` runs everything locally — docker Postgres, **MinIO** (S3-compatible
-storage, identical presign flow to AWS S3), and the dev-auth shim (ADR-012,
-hard-disabled in production). Point the same build at **Cloudflare** (Clerk ·
-Neon · R2 · Workers), **AWS** (Cognito · Aurora · S3) or **Azure** (Entra ·
-Azure PG · Blob) by changing config only — see the portability map in
-`docs/runbook.md`.
+port. The default `.env` runs everything locally — docker Postgres, **MinIO**
+(S3-compatible storage, identical presign flow to R2), and the dev-auth shim
+(ADR-012, hard-disabled in production). The production target is **Cloudflare**
+(Neon Auth · Neon Postgres · R2 · Workers), selected by `NEON_AUTH_BASE_URL` /
+`S3_BUCKET` / `DATABASE_URL` — see the portability map in `docs/runbook.md`.
+AWS and Azure are parked (ADR-027): the ports remain, the provider code is out
+of the tree.
 
 ## What works today
 
@@ -78,22 +78,29 @@ Sprints 0–4 are shipped. The headline capabilities:
   annotate / out-of-band exception), zero-consumption streak, location-absent,
   duplicate-mismatch. Passing reads marked billable.
 - **Supervisor console** — exception queue and detail with certification, runs,
-  roster, assignment and mid-run splits, dashboard, exports.
+  roster, assignment and mid-run splits, dashboard, exports. Escalation hands a
+  decision to the admin queue without closing the item.
 - **Field reader PWA** (ADR-020) — genuine offline store-and-forward: IndexedDB
   queue, capture-order sync, exactly-once via the queue id as the server's
   idempotency key, photo upload decoupled from read acceptance.
 - **Offline route map** (ADR-022) — self-hosted PMTiles basemap over R2 range
   requests, pre-warmed per route, with a coordinate-plot fallback (ADR-021).
+  Pack provisioning is scripted (`scripts/provision-tiles.sh`).
 - **Billing export** (ADR-023) — per client and cycle, snapshotted immutably and
   re-served rather than re-rendered; supersede is transactional.
 - **Skips carry evidence** (ADR-025) — reason plus a photograph, enforced
   server-side, raising a reviewable exception against the stop.
-- **Auth** — Clerk via a generic OIDC verifier, with roles **DB-authoritative**
-  (never read from the token) and provisioned by a signature-verified webhook.
+- **Auth** — Neon Auth (managed Better Auth) behind a generic OIDC verifier
+  that derives issuer, JWKS and audience from one base URL, with roles
+  **DB-authoritative** (never read from the token). Invitations are pending
+  roster rows, linked automatically on first verified sign-in — no webhook
+  (ADR-027).
 - **Simulator** — deterministic seasonal generation, playback through the public
   API with zero privileged access, and an anomaly matrix that trips every rule.
 
-**140 tests** across API, contracts, web and simulator. CI runs build, lint,
+**173 tests** across API, contracts, web and simulator, plus a versioned
+verifier (`verifier/`) whose automated UAT drives the compiled API and
+simulator against a scratch database end to end. CI runs build, lint,
 typecheck, migrations and the full suite against a real Postgres.
 
 **Demo:** simulator → public API → validated reads + typed exceptions in the
@@ -103,14 +110,14 @@ database. *"The pipeline works end to end with no UI."*
 
 The cloud target is a **config choice, not a rewrite** (ADR-015). **Cloudflare is
 the chosen target** (ADR-019) — Workers/OpenNext for web, Containers for the API,
-Neon for Postgres, R2 for storage, Clerk for identity — deployed from GitHub
-Actions, gated on green CI. AWS and Azure remain reachable by config. Steps are
-in [`docs/runbook.md`](./docs/runbook.md).
+Neon for Postgres, R2 for storage, Neon Auth for identity (ADR-027) — deployed
+from GitHub Actions, gated on green CI. AWS and Azure are parked, not wired.
+Steps are in [`docs/runbook.md`](./docs/runbook.md).
 
 ## Where things go next
 
 **[`docs/STATUS.md`](./docs/STATUS.md) is the single source of truth** for what
 is built, what is verified versus merely scaffolded, and what is still open.
 Start there. The reasoning behind each choice is in
-[`docs/decisions/`](./docs/decisions/) (25 ADRs) and the operational steps are in
+[`docs/decisions/`](./docs/decisions/) (27 ADRs) and the operational steps are in
 [`docs/runbook.md`](./docs/runbook.md).
