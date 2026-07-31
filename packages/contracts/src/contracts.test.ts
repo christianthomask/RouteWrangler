@@ -12,7 +12,7 @@ describe('contracts', () => {
   it('validates a MeResponse', () => {
     const parsed = MeResponseSchema.safeParse({
       id: '11111111-1111-4111-8111-111111111111',
-      cognitoSub: 'sub-abc',
+      authSub: 'sub-abc',
       displayName: 'Jeramehl',
       role: 'supervisor',
     });

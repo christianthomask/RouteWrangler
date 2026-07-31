@@ -68,7 +68,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          # The branch's Neon Auth URL, inlined at build time. Leave it unset and
+          # the production build fails closed to "identity provider pending
+          # setup" rather than to the dev bypass (see lib/config.ts).
+          NEXT_PUBLIC_NEON_AUTH_URL: ${{ vars.NEXT_PUBLIC_NEON_AUTH_URL }}
         run: |
           pnpm exec opennextjs-cloudflare build
           pnpm exec wrangler deploy

@@ -4,8 +4,8 @@ import { authDevBypass } from './config';
 
 /**
  * Client session. Two modes: `dev` stores a seeded user's sub and sends it as
- * `x-dev-user-sub` (local, ADR-012); `token` stores a real IdP JWT (Clerk, when
- * wired). One accessor — `authHeaders()` — so callers never branch on mode.
+ * `x-dev-user-sub` (local, ADR-012); `token` stores a real IdP JWT (Neon Auth,
+ * ADR-027). One accessor — `authHeaders()` — so callers never branch on mode.
  */
 const DEV_SUB_KEY = 'rw.devSub';
 const TOKEN_KEY = 'rw.idToken';
@@ -27,7 +27,7 @@ export function signInDev(sub: string): void {
  *
  * Why we accept it here: the API is a separate origin, so cookie auth would need
  * cross-site cookies (SameSite=None; Secure) plus CSRF defence on every mutating
- * route, and Clerk would have to mint/refresh the session cookie server-side —
+ * route, and the IdP would have to mint/refresh the session cookie server-side —
  * an API + IdP change, not a web-app change. The app itself is currently free of
  * injection sinks (no dangerouslySetInnerHTML / innerHTML / eval / srcDoc; all
  * hrefs are literal or numeric), which is what actually keeps this safe today.
@@ -35,35 +35,36 @@ export function signInDev(sub: string): void {
  * Real mitigation, in order of value:
  *   1. Keep the app XSS-clean — that invariant is doing the load-bearing work.
  *      Any future dangerouslySetInnerHTML re-opens this hole.
- *   2. Short token TTL + refresh via the Clerk bridge, so a stolen token dies fast.
+ *   2. Short token TTL + refresh via NeonTokenBridge, so a stolen token dies
+ *      fast. Neon Auth access tokens expire in 15 minutes.
  *   3. A strict CSP (no unsafe-inline/unsafe-eval) to blunt injection generally.
- *   4. Only then: move to httpOnly cookies + CSRF tokens (API + Clerk work).
+ *   4. Only then: move to httpOnly cookies + CSRF tokens (API + IdP work).
  */
 export function setToken(token: string): void {
   window.localStorage.setItem(TOKEN_KEY, token);
 }
 
-/** Clears the stored JWT without touching the Clerk session (bridge use). */
+/** Clears the stored JWT without touching the IdP session (bridge use). */
 export function clearToken(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(TOKEN_KEY);
 }
 
 /**
- * The Clerk provider (when mounted) registers its `signOut` here so the single
- * `signOut()` below ends the IdP session too — otherwise the token bridge would
+ * The token bridge (when mounted) registers the IdP's `signOut` here so the
+ * single `signOut()` below ends that session too — otherwise the bridge would
  * just mint a fresh token and re-sign the user in. Null in dev-bypass builds.
  */
-let clerkSignOut: (() => void | Promise<void>) | null = null;
-export function registerClerkSignOut(fn: (() => void | Promise<void>) | null): void {
-  clerkSignOut = fn;
+let idpSignOut: (() => void | Promise<void>) | null = null;
+export function registerIdpSignOut(fn: (() => void | Promise<void>) | null): void {
+  idpSignOut = fn;
 }
 
 export function signOut(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(DEV_SUB_KEY);
   window.localStorage.removeItem(TOKEN_KEY);
-  if (clerkSignOut) void clerkSignOut();
+  if (idpSignOut) void idpSignOut();
 }
 
 export function isSignedIn(): boolean {

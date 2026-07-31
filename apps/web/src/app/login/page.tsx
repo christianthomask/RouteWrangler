@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { DevUser } from '@routewrangler/contracts';
 import { Brand } from '@/components/Brand';
-import { ClerkLogin } from '@/components/auth/ClerkLogin';
-import { authDevBypass, clerkConfigured } from '@/lib/config';
+import { NeonLogin } from '@/components/auth/NeonLogin';
+import { authDevBypass, neonAuthConfigured } from '@/lib/config';
 import { signInDev } from '@/lib/session';
 import { fetchDevUsers, fetchMe } from '@/lib/api';
 import { HOME_BY_ROLE } from '@/design/tokens';
@@ -97,7 +97,7 @@ export default function LoginPage() {
                   margin: '0 0 var(--rw-space-4)',
                 }}
               >
-                Local development — continue as a seeded user. (Clerk sign-in
+                Local development — continue as a seeded user. (Google sign-in
                 replaces this in deployed environments.)
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--rw-space-2)' }}>
@@ -127,8 +127,8 @@ export default function LoginPage() {
                 )}
               </div>
             </>
-          ) : clerkConfigured ? (
-            <ClerkLogin />
+          ) : neonAuthConfigured ? (
+            <NeonLogin />
           ) : (
             <p
               style={{

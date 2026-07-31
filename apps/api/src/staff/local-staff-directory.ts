@@ -1,5 +1,4 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import type { PendingInvitation } from '@routewrangler/contracts';
 import type { CreateStaffInput, CreateStaffOutcome, StaffDirectoryPort } from './staff-directory.port';
 
 /** The prefix the seed uses for rows that exist only in the local database (ADR-012). */
@@ -24,9 +23,9 @@ export function usernameFromDisplayName(displayName: string): string {
  * member is just minting the subject the dev-auth shim will recognise. All real
  * state lives in the `users` row that `StaffService` writes.
  *
- * Never active in production: `staffProvider` only resolves to `local` when
- * Clerk credentials are absent, and `StaffService` additionally refuses to
- * create local accounts unless the dev bypass is on.
+ * Never active in production: `staffProvider` only resolves to `local` when no
+ * IdP is configured, and `StaffService` additionally refuses to create local
+ * accounts unless the dev bypass is on.
  */
 @Injectable()
 export class LocalStaffDirectory implements StaffDirectoryPort {
@@ -39,7 +38,7 @@ export class LocalStaffDirectory implements StaffDirectoryPort {
         'could not derive a username from that display name — supply one explicitly',
       );
     }
-    return { kind: 'provisioned', cognitoSub: `${LOCAL_SUB_PREFIX}${username}` };
+    return { kind: 'provisioned', authSub: `${LOCAL_SUB_PREFIX}${username}` };
   }
 
   // Role and activation live entirely in the `users` row for this adapter.
@@ -49,9 +48,5 @@ export class LocalStaffDirectory implements StaffDirectoryPort {
 
   setActive(): Promise<void> {
     return Promise.resolve();
-  }
-
-  listPendingInvitations(): Promise<PendingInvitation[]> {
-    return Promise.resolve([]);
   }
 }

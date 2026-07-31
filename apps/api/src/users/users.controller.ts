@@ -13,7 +13,7 @@ export class UsersController {
   me(@CurrentUser() user: AuthUser): MeResponse {
     return MeResponseSchema.parse({
       id: user.id,
-      cognitoSub: user.cognitoSub,
+      authSub: user.authSub,
       displayName: user.displayName,
       role: user.role,
     });

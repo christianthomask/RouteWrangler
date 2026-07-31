@@ -71,6 +71,13 @@
       "when": 1784689785896,
       "tag": "0009_mighty_killmonger",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785466737783,
+      "tag": "0010_auth_identity",
+      "breakpoints": true
     }
   ]
 }

@@ -40,21 +40,59 @@ export const exceptionStatusEnum = pgEnum('exception_status', [
 export const rereadTaskStatusEnum = pgEnum('reread_task_status', ['issued', 'delivered', 'done']);
 
 // ── users ───────────────────────────────────────────────────────────────────
-export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  cognitoSub: text('cognito_sub').notNull().unique(),
-  displayName: text('display_name').notNull(),
-  role: roleEnum('role').notNull(),
-  /**
-   * Soft-deactivation. `users.id` is FK-referenced by runs, exceptions and
-   * audit rows without cascade, so a departed staff member with history cannot
-   * be hard-deleted. Deactivating revokes access while preserving that history;
-   * the auth guard refuses inactive rows.
-   */
-  active: boolean('active').notNull().default(true),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+/**
+ * The authorization record. One row per staff member, and the only thing the
+ * auth guard trusts: role and `active` are read from here on every request,
+ * never from a token claim.
+ *
+ * A row exists in one of two states (ADR-027):
+ *
+ * - **invited** — `auth_sub` is null, `email` is set. Somebody has been given a
+ *   role but has not yet signed in, so no identity is attached to it yet.
+ * - **linked** — `auth_sub` holds the IdP's subject id. Set exactly once, by the
+ *   guard, on the invitee's first verified sign-in.
+ *
+ * That is why `auth_sub` is nullable and `email` is not merely decorative: the
+ * pair *is* the invitation mechanism, which is what let the Clerk membership
+ * webhook be deleted rather than reimplemented against a new vendor.
+ */
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /**
+     * The IdP's subject id, once known. Null while an invitation is outstanding.
+     * Unique, so two identities can never converge on one authorization record
+     * — that uniqueness is what makes the claim UPDATE safe under concurrency.
+     */
+    authSub: text('auth_sub').unique(),
+    /**
+     * Stored lowercased; the guard lowercases the verified token claim before
+     * comparing. Required for invited rows (see the check constraint) because it
+     * is the only handle on a person whose identity does not exist yet.
+     */
+    email: text('email'),
+    displayName: text('display_name').notNull(),
+    role: roleEnum('role').notNull(),
+    /**
+     * Soft-deactivation. `users.id` is FK-referenced by runs, exceptions and
+     * audit rows without cascade, so a departed staff member with history cannot
+     * be hard-deleted. Deactivating revokes access while preserving that history;
+     * the auth guard refuses inactive rows.
+     */
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // A row with neither an identity nor an address is unreachable by anyone:
+    // nobody can sign in as it and no invitation can ever land on it.
+    check('users_identity_or_invite', sql`${t.authSub} IS NOT NULL OR ${t.email} IS NOT NULL`),
+    // Case-folded, so Alice@x.com and alice@x.com cannot become two competing
+    // invitations that the guard would then have to choose between.
+    uniqueIndex('users_email_lower_idx').on(sql`lower(${t.email})`),
+  ],
+);
 
 // ── clients (city utility clients — first-class, ADR/§2.4) ───────────────────
 export const clients = pgTable('clients', {

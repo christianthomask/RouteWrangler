@@ -63,7 +63,7 @@ export default function StaffPage() {
         <h1 style={{ fontSize: 'var(--rw-text-2xl)', margin: 0 }}>Staff</h1>
         {data && (
           <span className="rw-badge" title="Where staff accounts are created">
-            {data.provider === 'clerk' ? 'Clerk' : 'Local'}
+            {data.provider === 'oidc' ? 'Neon Auth' : 'Local'}
           </span>
         )}
       </div>
@@ -138,7 +138,9 @@ export default function StaffPage() {
                   </div>
                 </div>
                 <div className="rw-row__meta">
-                  <span>{m.cognitoSub}</span>
+                  {/* No sub yet means invited-but-never-signed-in, which is the
+                      state an admin most needs to be able to see at a glance. */}
+                  <span>{m.authSub ?? `${m.email} — invited, not signed in yet`}</span>
                   {!m.active && <span style={{ color: 'var(--rw-danger)' }}>Access revoked</span>}
                 </div>
               </div>
@@ -165,9 +167,10 @@ function CreateStaffForm({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Clerk sends an invitation to an address, so email is required there. The
-  // local adapter mints the account outright and has nowhere to send anything.
-  const needsEmail = provider === 'clerk';
+  // With a real IdP the address is the only thing that will match this person to
+  // their row when they first sign in, so it is required. The local adapter
+  // mints the account outright and has nothing to match later.
+  const needsEmail = provider === 'oidc';
   const canSubmit = displayName.trim() !== '' && (!needsEmail || email.trim() !== '') && !busy;
 
   async function submit(e: React.FormEvent) {
@@ -183,8 +186,8 @@ function CreateStaffForm({
       });
       setNotice(
         res.invitation
-          ? `Invitation sent to ${res.invitation.email}. They appear below once they accept.`
-          : `Created ${res.member?.displayName} — sign-in id ${res.member?.cognitoSub}`,
+          ? `${res.invitation.displayName} can now sign in with Google as ${res.invitation.email}.`
+          : `Created ${res.member?.displayName} — sign-in id ${res.member?.authSub}`,
       );
       setDisplayName('');
       setEmail('');
@@ -249,7 +252,7 @@ function CreateStaffForm({
 
       <p style={{ fontSize: 'var(--rw-text-xs)', color: 'var(--rw-text-muted)', margin: 0 }}>
         {needsEmail
-          ? 'Invites them to the Clerk organization. The account appears here once they accept.'
+          ? 'Creates the account now with no sign-in attached. Tell them to sign in with Google using this exact address.'
           : 'Creates a local account usable immediately from the sign-in page.'}
       </p>
     </form>

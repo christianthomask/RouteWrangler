@@ -39,7 +39,7 @@ export const SEED_USERS: SeedUser[] = [
   },
 ];
 
-/** Deterministic placeholder sub used only in local-only seeding (no pool). */
+/** Deterministic subject for a seeded user — recognised only by the dev shim. */
 export function localOnlySub(username: string): string {
   return `local-only:${username}`;
 }

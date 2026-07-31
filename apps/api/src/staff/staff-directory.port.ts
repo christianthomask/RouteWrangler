@@ -1,11 +1,11 @@
-import type { PendingInvitation, Role } from '@routewrangler/contracts';
+import type { Role } from '@routewrangler/contracts';
 
 /**
  * Port 3 — the staff directory (ADR-024), alongside ADR-015's storage and auth
  * ports. It abstracts *the identity provider side* of staff administration only.
  * Writing the local `users` row is deliberately NOT part of this interface:
  * that row is the authorization record and stays owned by `StaffService`, so
- * both adapters produce identical database state.
+ * every adapter produces identical database state.
  */
 
 export interface CreateStaffInput {
@@ -16,30 +16,31 @@ export interface CreateStaffInput {
 }
 
 /**
- * Either the identity exists now and we know its subject (`local`, where the
- * dev shim has no state to create), or an invitation is outstanding and the
- * subject will not be known until the person accepts and the Clerk webhook
- * lands the row (`clerk`).
+ * Either the identity exists now and we know its subject (`local`, where the dev
+ * shim has no external state to create), or the account is an invitation and the
+ * subject stays unknown until that person signs in for the first time (`oidc`,
+ * ADR-027).
  */
 export type CreateStaffOutcome =
-  | { kind: 'provisioned'; cognitoSub: string }
-  | { kind: 'invited'; invitation: PendingInvitation };
+  | { kind: 'provisioned'; authSub: string }
+  | { kind: 'invited'; email: string };
 
 export interface StaffDirectoryPort {
   createStaff(input: CreateStaffInput): Promise<CreateStaffOutcome>;
 
-  /** Push a role change to the identity provider. Keyed by the provider's own subject id. */
-  setRole(cognitoSub: string, role: Role): Promise<void>;
+  /**
+   * Push a role change to the identity provider, for providers that mirror roles
+   * on their side. Keyed by the provider's own subject id — null for someone who
+   * has not signed in yet, in which case there is nothing to push to.
+   */
+  setRole(authSub: string | null, role: Role): Promise<void>;
 
   /**
-   * Grant or revoke the provider-side membership. Revoking here is belt-and-braces:
-   * the local row's `active: false` is what the auth guard actually enforces, and
-   * it takes effect on the very next request.
+   * Grant or revoke the provider-side membership. Belt-and-braces everywhere:
+   * the local row's `active: false` is what the auth guard actually enforces,
+   * and it takes effect on the very next request.
    */
-  setActive(cognitoSub: string, active: boolean): Promise<void>;
-
-  /** Invitations sent but not yet accepted. Empty for providers that have none. */
-  listPendingInvitations(): Promise<PendingInvitation[]>;
+  setActive(authSub: string | null, active: boolean): Promise<void>;
 }
 
 /** DI token for the resolved adapter. */

@@ -5,7 +5,7 @@ import { StaffController } from './staff.controller';
 import { DevUsersController } from './dev-users.controller';
 import { StaffService } from './staff.service';
 import { LocalStaffDirectory } from './local-staff-directory';
-import { ClerkStaffDirectory } from './clerk-staff-directory';
+import { OidcStaffDirectory } from './oidc-staff-directory';
 import { STAFF_DIRECTORY, type StaffDirectoryPort } from './staff-directory.port';
 
 /**
@@ -20,11 +20,7 @@ import { STAFF_DIRECTORY, type StaffDirectoryPort } from './staff-directory.port
       provide: STAFF_DIRECTORY,
       inject: [ENV],
       useFactory: (env: Env): StaffDirectoryPort =>
-        env.staffProvider === 'clerk'
-          ? // Both are guaranteed present — `staffProvider` only resolves to
-            // 'clerk' when they are (see loadEnv).
-            new ClerkStaffDirectory(env.CLERK_SECRET_KEY as string, env.CLERK_ORGANIZATION_ID as string)
-          : new LocalStaffDirectory(),
+        env.staffProvider === 'oidc' ? new OidcStaffDirectory() : new LocalStaffDirectory(),
     },
   ],
 })

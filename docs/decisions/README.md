@@ -8,10 +8,10 @@ sprint that makes a non-obvious choice adds one.
 
 | ADR | Decision |
 | --- | --- |
-| [001](./ADR-001-stack-and-architecture.md) | Stack and architecture (TS monorepo; Next/Nest/Aurora/Drizzle/S3/Cognito; CommonJS backend) — **amended by 015**; the shipped target is Cloudflare/Neon/R2/Clerk (019) |
+| [001](./ADR-001-stack-and-architecture.md) | Stack and architecture (TS monorepo; Next/Nest/Aurora/Drizzle/S3/Cognito; CommonJS backend) — **amended by 015**; the shipped target is Cloudflare/Neon/R2/Neon Auth (019, 026, 027) |
 | [002](./ADR-002-immutable-read-events.md) | Read events are immutable |
 | [003](./ADR-003-taxonomy-as-data-rules-as-code.md) | Taxonomy as data, rules as code |
-| [004](./ADR-004-cognito-from-day-1.md) | Cognito auth from day 1 — **amended by 015**; the shipped IdP is **Clerk** via the generic OIDC verifier (see 019). Body is still Cognito-specific; a dedicated Clerk ADR is owed (`docs/STATUS.md`) |
+| [004](./ADR-004-cognito-from-day-1.md) | Cognito auth from day 1 — **superseded**: 015 made the provider a config choice, 026 deleted the Cognito code, 027 makes **Neon Auth** the IdP. What survives is the shape: OIDC verification, DB-authoritative roles |
 | [005](./ADR-005-split-invariant.md) | The split invariant |
 | [006](./ADR-006-no-consumption-estimation.md) | No consumption estimation |
 | [007](./ADR-007-staff-see-all-clients.md) | Staff see all clients; client switcher is a view filter |
@@ -31,5 +31,7 @@ sprint that makes a non-obvious choice adds one.
 | [021](./ADR-021-offline-route-map.md) | Offline route map from stop coordinates (no tiles) |
 | [022](./ADR-022-self-hosted-basemap.md) | Real basemap via self-hosted PMTiles + MapLibre, offline per route |
 | [023](./ADR-023-billing-export.md) | Billing export: snapshot per client + cycle |
-| [024](./ADR-024-staff-directory-port.md) | Staff administration via a directory port; identity stays with the IdP (extends 015) |
+| [024](./ADR-024-staff-directory-port.md) | Staff administration via a directory port; identity stays with the IdP (extends 015) — **amended by 027**: the Clerk adapter is gone and invitations are rows, not webhook deliveries |
 | [025](./ADR-025-skips-carry-evidence.md) | A skip carries evidence, and an exception may hang off a stop (extends 003) |
+| [026](./ADR-026-park-aws-and-azure.md) | Park AWS and Azure: delete the provider code, keep the ports (amends 004, 015) |
+| [027](./ADR-027-neon-auth.md) | Neon Auth is the IdP; invitations are rows, not webhooks (supersedes the Clerk choice in 019; amends 004, 024) |

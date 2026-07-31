@@ -1,11 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { S3StorageAdapter } from './s3.adapter';
-import { AzureBlobStorageAdapter } from './azure-blob.adapter';
 import { NullStorageAdapter } from './null.adapter';
 
 /**
- * Presigned-URL generation is local crypto (no server round-trip), so both
- * adapters are fully testable here. This proves the storage port (ADR-015)
+ * Presigned-URL generation is local crypto (no server round-trip), so the
+ * adapter is fully testable here. This proves the storage port (ADR-015)
  * produces correct, provider-shaped URLs — the API's actual responsibility.
  */
 describe('S3StorageAdapter (S3-compatible, incl. MinIO)', () => {
@@ -33,24 +32,25 @@ describe('S3StorageAdapter (S3-compatible, incl. MinIO)', () => {
   });
 });
 
-describe('AzureBlobStorageAdapter', () => {
-  const azure = new AzureBlobStorageAdapter({
-    account: 'testacct',
-    container: 'photos',
-    accountKey: Buffer.from('test-signing-key').toString('base64'),
+describe('S3StorageAdapter (R2 — same adapter, endpoint only)', () => {
+  // R2 is the production target (ADR-019) and reaches it through exactly this
+  // path: no code branch, just a different endpoint and `auto` as the region.
+  const r2 = new S3StorageAdapter({
+    bucket: 'verameter-photos',
+    region: 'auto',
+    endpoint: 'https://acct123.r2.cloudflarestorage.com',
+    forcePathStyle: true,
+    accessKeyId: 'r2-key',
+    secretAccessKey: 'r2-secret',
   });
 
-  it('presigns a SAS PUT with the BlockBlob header', async () => {
-    const up = await azure.presignUpload('photos/abc.jpg', 'image/jpeg', 900);
+  it('presigns against the R2 endpoint with no provider-specific code', async () => {
+    const up = await r2.presignUpload('photos/abc.jpg', 'image/jpeg', 900);
     expect(up.method).toBe('PUT');
-    expect(up.uploadUrl).toContain('https://testacct.blob.core.windows.net/photos/');
-    expect(up.uploadUrl).toContain('sig=');
-    expect(up.headers['x-ms-blob-type']).toBe('BlockBlob');
-  });
-
-  it('presigns a SAS GET download', async () => {
-    const url = await azure.presignDownload('photos/abc.jpg', 900);
-    expect(url).toContain('sig=');
+    expect(up.uploadUrl).toContain(
+      'https://acct123.r2.cloudflarestorage.com/verameter-photos/photos/abc.jpg',
+    );
+    expect(up.uploadUrl).toContain('X-Amz-Signature=');
   });
 });
 

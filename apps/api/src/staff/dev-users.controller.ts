@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, NotFoundException } from '@nestjs/common';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNotNull } from 'drizzle-orm';
 import type { DevUserListResponse } from '@routewrangler/contracts';
 import { Public } from '../auth/public.decorator';
 import { DB } from '../db/db.module';
@@ -32,12 +32,14 @@ export class DevUsersController {
   async list(): Promise<DevUserListResponse> {
     if (!this.env.authDevBypass) throw new NotFoundException();
     const rows = await this.db
-      .select({ sub: users.cognitoSub, displayName: users.displayName, role: users.role })
+      .select({ sub: users.authSub, displayName: users.displayName, role: users.role })
       .from(users)
       // Deactivated staff would be rejected by the guard immediately after
       // "signing in", which reads as a broken login rather than a revoked one.
-      .where(eq(users.active, true))
+      // Invited-but-never-linked rows have no sub to send, so they are not
+      // offerable here either — the bypass has no way to become them.
+      .where(and(eq(users.active, true), isNotNull(users.authSub)))
       .orderBy(asc(users.displayName));
-    return { users: rows };
+    return { users: rows.map((r) => ({ ...r, sub: r.sub as string })) };
   }
 }

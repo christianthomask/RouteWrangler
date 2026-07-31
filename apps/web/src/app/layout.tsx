@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
-import { ClerkProvider } from '@clerk/nextjs';
 import './globals.css';
 import { PRODUCT_NAME, PRODUCT_DESCRIPTOR } from '@/design/brand';
-import { clerkConfigured } from '@/lib/config';
-import { ClerkTokenBridge } from '@/components/auth/ClerkTokenBridge';
+import { neonAuthConfigured } from '@/lib/config';
+import { NeonTokenBridge } from '@/components/auth/NeonTokenBridge';
 
 export const metadata: Metadata = {
   title: PRODUCT_NAME,
@@ -11,20 +10,15 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // Clerk wraps the app only once a publishable key is configured (deployed
-  // environments). Locally, the dev-bypass login runs with no provider at all
-  // (ADR-012, ADR-015) — so Clerk hooks are only ever mounted under the guard.
+  // No provider component to wrap the tree in: the Neon Auth React client holds
+  // its session in its own store, so the bridge is just a sibling that keeps the
+  // API token fresh. It mounts only once an auth URL is configured — locally the
+  // dev-bypass login runs with no IdP at all (ADR-012, ADR-015, ADR-027).
   return (
     <html lang="en">
       <body>
-        {clerkConfigured ? (
-          <ClerkProvider>
-            <ClerkTokenBridge />
-            {children}
-          </ClerkProvider>
-        ) : (
-          children
-        )}
+        {neonAuthConfigured && <NeonTokenBridge />}
+        {children}
       </body>
     </html>
   );

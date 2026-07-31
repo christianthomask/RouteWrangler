@@ -6,11 +6,11 @@ import { loadEnv } from './config/env';
 
 async function bootstrap() {
   const env = loadEnv();
-  // rawBody: true preserves the exact request bytes so the Clerk webhook can
-  // verify its Svix signature (see webhooks/clerk-webhook.controller.ts).
+  // No rawBody: nothing here verifies a signature over exact request bytes any
+  // more. The IdP webhook that needed it is gone — identities link themselves on
+  // first sign-in instead (ADR-027).
   const app = await NestFactory.create(AppModule, {
     logger: ['log', 'warn', 'error'],
-    rawBody: true,
   });
 
   // Request/response validation is Zod-based via @routewrangler/contracts

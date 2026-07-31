@@ -1,8 +1,13 @@
 # ADR-004 — Cognito auth from day 1
 
-Status: Accepted (Sprint 0). **Amended by ADR-015** — generalized to OIDC day 1
-(Cognito is the default adapter; Entra/generic are a config change). The
-verify-JWKS-then-load-local-user pattern is unchanged.
+Status: **Superseded.** ADR-015 generalized this to OIDC, ADR-026 deleted the
+Cognito adapter, and ADR-027 makes Neon Auth the identity provider. Read the body
+below as history: no user pool exists, and `cognito_sub` is now `auth_sub`.
+
+What survives verbatim is the *shape* — verify the JWT against the issuer's
+JWKS, then load the local `users` row and take role and `active` from it, never
+from a token claim. Three IdPs later that pattern has not needed to change, which
+is the part worth having decided on day 1.
 
 ## Context
 

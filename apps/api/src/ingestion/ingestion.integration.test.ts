@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+﻿import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq, inArray } from 'drizzle-orm';
 import { createDb, type Database } from '../db/client';
@@ -20,15 +20,15 @@ import { seedTaxonomy } from '../../seed/taxonomy';
 import { IngestionService } from './ingestion.service';
 
 /**
- * Idempotency AC (BUILD_SPEC §7.1): replaying a full synced batch creates zero
- * duplicates and returns per-event statuses. DB-backed — runs when DATABASE_URL
+ * Idempotency AC (BUILD_SPEC Â§7.1): replaying a full synced batch creates zero
+ * duplicates and returns per-event statuses. DB-backed â€” runs when DATABASE_URL
  * is set (CI + local Postgres), skipped otherwise so unit runs stay hermetic.
  */
 const url = process.env.DATABASE_URL;
 const suite = url ? describe : describe.skip;
 
 /**
- * These suites write real rows to whatever DATABASE_URL points at — locally,
+ * These suites write real rows to whatever DATABASE_URL points at â€” locally,
  * the dev database. Left behind, the fixtures show up as phantom clients and
  * meters in the console. Each suite records what it created and removes it,
  * children first, so a developer's database looks the same after a test run as
@@ -67,7 +67,7 @@ async function cleanup(db: Database, f: Fixtures): Promise<void> {
 
   /*
    * Strict child-to-parent order. Exceptions reference read_events, and
-   * run_stops references a read event back — so every exception goes first, the
+   * run_stops references a read event back â€” so every exception goes first, the
    * back-reference is nulled, and only then can the reads be removed.
    */
   if (f.clientIds.length) await db.delete(exceptions).where(inArray(exceptions.clientId, f.clientIds));
@@ -93,7 +93,7 @@ suite('ingestion idempotency (integration)', () => {
   /*
    * Exception types, severities and skip reasons are taxonomy-as-data (ADR-003),
    * so ingestion and skipping both resolve them from the database. CI migrates
-   * but does not seed, so these suites seed the lookups themselves — idempotent,
+   * but does not seed, so these suites seed the lookups themselves â€” idempotent,
    * and the reason they passed locally against an already-seeded dev database
    * while failing in CI.
    */
@@ -106,7 +106,7 @@ suite('ingestion idempotency (integration)', () => {
   });
 
   it('a replayed batch creates zero duplicates and returns exactly-once', async () => {
-    // Minimal fixtures with fresh ids (FKs: client ← meter, user ← reader).
+    // Minimal fixtures with fresh ids (FKs: client â† meter, user â† reader).
     const clientId = randomUUID();
     const meterId = randomUUID();
     const readerId = randomUUID();
@@ -124,7 +124,7 @@ suite('ingestion idempotency (integration)', () => {
     });
     await db.insert(users).values({
       id: readerId,
-      cognitoSub: `test:${readerId}`,
+      authSub: `test:${readerId}`,
       displayName: 'Test Reader',
       role: 'reader',
     });
@@ -174,7 +174,7 @@ suite('run stop read of record (integration)', () => {
   /*
    * Exception types, severities and skip reasons are taxonomy-as-data (ADR-003),
    * so ingestion and skipping both resolve them from the database. CI migrates
-   * but does not seed, so these suites seed the lookups themselves — idempotent,
+   * but does not seed, so these suites seed the lookups themselves â€” idempotent,
    * and the reason they passed locally against an already-seeded dev database
    * while failing in CI.
    */
@@ -207,7 +207,7 @@ suite('run stop read of record (integration)', () => {
     });
     await db.insert(users).values({
       id: readerId,
-      cognitoSub: `test:${readerId}`,
+      authSub: `test:${readerId}`,
       displayName: 'Test Reader',
       role: 'reader',
     });
@@ -308,7 +308,7 @@ suite('skip evidence and review (integration)', () => {
   /*
    * Exception types, severities and skip reasons are taxonomy-as-data (ADR-003),
    * so ingestion and skipping both resolve them from the database. CI migrates
-   * but does not seed, so these suites seed the lookups themselves — idempotent,
+   * but does not seed, so these suites seed the lookups themselves â€” idempotent,
    * and the reason they passed locally against an already-seeded dev database
    * while failing in CI.
    */
@@ -336,7 +336,7 @@ suite('skip evidence and review (integration)', () => {
       serviceAddress: '1 Test St', registerDials: 5,
     });
     await db.insert(users).values({
-      id: readerId, cognitoSub: `test:${readerId}`, displayName: 'Test Reader', role: 'reader',
+      id: readerId, authSub: `test:${readerId}`, displayName: 'Test Reader', role: 'reader',
     });
     await db.insert(routeRuns).values({
       id: runId, routeId, clientId, readerId,
@@ -353,7 +353,7 @@ suite('skip evidence and review (integration)', () => {
     expect(row?.status).toBe('pending');
   });
 
-  it('allows unsafe_conditions without one — do not ask a reader to linger', async () => {
+  it('allows unsafe_conditions without one â€” do not ask a reader to linger', async () => {
     const f = await stop();
     await svc.skipStop(f.runId, f.stopId, 'unsafe_conditions', f.readerId);
     const [row] = await db.select().from(runStops).where(eq(runStops.id, f.stopId));
@@ -369,7 +369,7 @@ suite('skip evidence and review (integration)', () => {
 
     const raised = await db.select().from(exceptions).where(eq(exceptions.runStopId, f.stopId));
     expect(raised).toHaveLength(1);
-    // The exception hangs off the stop, never a synthetic read — a placeholder
+    // The exception hangs off the stop, never a synthetic read â€” a placeholder
     // value would land in the meter's baseline and corrupt the next real read.
     expect(raised[0]?.readEventId).toBeNull();
   });

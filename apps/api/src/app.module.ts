@@ -17,7 +17,6 @@ import { RosterModule } from './roster/roster.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { FieldModule } from './field/field.module';
 import { ExportsModule } from './exports/exports.module';
-import { WebhooksModule } from './webhooks/webhooks.module';
 import { StaffModule } from './staff/staff.module';
 
 @Module({
@@ -40,7 +39,6 @@ import { StaffModule } from './staff/staff.module';
     CatalogModule,
     FieldModule,
     ExportsModule,
-    WebhooksModule,
     StaffModule,
   ],
 })

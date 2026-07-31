@@ -4,7 +4,7 @@ import type { Role } from '@routewrangler/contracts';
 /** The authenticated principal attached to the request by the JWT guard. */
 export interface AuthUser {
   id: string;
-  cognitoSub: string;
+  authSub: string;
   displayName: string;
   role: Role;
 }

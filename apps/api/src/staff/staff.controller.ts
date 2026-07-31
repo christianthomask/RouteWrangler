@@ -2,7 +2,9 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -58,5 +60,19 @@ export class StaffController {
     const parsed = UpdateStaffActiveRequestSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     return this.staff.setActive(id, parsed.data.active, user.id);
+  }
+
+  /**
+   * Withdraw an invitation that was never accepted — the wrong address, or
+   * someone who never started. Only ever removes rows with no identity attached;
+   * a staff member who has signed in is deactivated, never deleted (ADR-027).
+   */
+  @Delete('invitations/:id')
+  @HttpCode(204)
+  revokeInvitation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    return this.staff.revokeInvitation(id, user.id);
   }
 }

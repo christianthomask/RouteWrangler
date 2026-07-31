@@ -1,6 +1,16 @@
 # ADR-024 — Staff administration via a directory port; identity stays with the IdP
 
-Status: Accepted (post-deploy). **Extends ADR-015.**
+Status: Accepted (post-deploy). **Extends ADR-015. Amended by ADR-027.**
+
+> **Amendment (ADR-027).** The port and every guardrail below still stand. What
+> changed is the second adapter: the `clerk` adapter is gone, replaced by an
+> `oidc` adapter that makes no outbound calls at all. Inviting someone now writes
+> the `users` row *immediately*, with an email and no subject id, and the auth
+> guard attaches the identity on that person's first verified sign-in — so "the
+> row appears only when the person accepts and the webhook fires" below is no
+> longer true, and neither is the asymmetric-reactivation consequence, which was
+> a Clerk limitation. Pending invitations are those same rows filtered by
+> `auth_sub IS NULL`, not a live read from the provider.
 
 ## Context
 
