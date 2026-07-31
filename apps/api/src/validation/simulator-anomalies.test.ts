@@ -11,9 +11,20 @@ import type { PriorRead } from '@routewrangler/contracts';
  * code the seed and playback use — so the guarantee holds without a database.
  */
 const BASELINE = 100;
+/** The instant every case is evaluated at; history is dated back from it. */
+const NOW = '2026-07-30T12:00:00.000Z';
+
+/** One read per month, newest a month before NOW — all inside the baseline window. */
+function dated(reads: Omit<PriorRead, 'capturedAt'>[]): PriorRead[] {
+  return reads.map((r, i) => {
+    const d = new Date(NOW);
+    d.setMonth(d.getMonth() - (reads.length - i));
+    return { ...r, capturedAt: d.toISOString() };
+  });
+}
 
 function steady(prevValue: number, tailZeros = 0): PriorRead[] {
-  const h: PriorRead[] = [
+  const h: Omit<PriorRead, 'capturedAt'>[] = [
     { value: 1000, consumption: BASELINE },
     { value: 1100, consumption: BASELINE },
     { value: 1200, consumption: BASELINE },
@@ -23,7 +34,7 @@ function steady(prevValue: number, tailZeros = 0): PriorRead[] {
   } else {
     h.push({ value: prevValue, consumption: BASELINE });
   }
-  return h;
+  return dated(h);
 }
 
 interface Case {
@@ -61,6 +72,7 @@ describe('simulator anomaly matrix trips every validation rule', () => {
       lat: read.lat,
       lng: read.lng,
       registerDials: dials,
+      capturedAt: NOW,
       history: steady(prevValue, tailZeros ?? 0),
       config: DEFAULT_VALIDATION_CONFIG,
     });
@@ -85,6 +97,7 @@ describe('simulator anomaly matrix trips every validation rule', () => {
       lat: read.lat,
       lng: read.lng,
       registerDials: 4,
+      capturedAt: NOW,
       history: steady(9949),
       config: DEFAULT_VALIDATION_CONFIG,
     });

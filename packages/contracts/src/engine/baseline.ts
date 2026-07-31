@@ -1,5 +1,42 @@
 import { registerMax } from '../validation';
-import type { Derived, ValidationInput } from './types';
+import type { Derived, PriorRead, ValidationInput } from './types';
+
+/**
+ * The instant `config.baselineMonths` before a read was captured. Mirrors what
+ * ingestion's history query does, so the engine and the SQL agree on where the
+ * window starts instead of each having its own idea of it.
+ */
+function windowStart(capturedAt: string, months: number): number {
+  const at = new Date(capturedAt);
+  if (Number.isNaN(at.getTime())) {
+    // The caller controls this value and the whole window is measured from it;
+    // guessing would mean silently validating against an unbounded history.
+    throw new Error(`ValidationInput.capturedAt is not a valid timestamp: ${capturedAt}`);
+  }
+  at.setMonth(at.getMonth() - months);
+  return at.getTime();
+}
+
+/**
+ * The prior reads that actually count toward this read's baseline.
+ *
+ * `config.baselineMonths` used to be declared and never enforced: `derive`
+ * averaged whatever history it was handed and honouring the window was left to
+ * each caller. The server bounded its query; the field app did not — so the same
+ * read could be judged against a different band depending on which side of the
+ * wire evaluated it, and those two are supposed to agree (ADR-020). The rule now
+ * lives with the code that depends on it.
+ *
+ * A prior read whose timestamp will not parse is excluded rather than assumed
+ * recent: it cannot be shown to be inside the window.
+ */
+function withinWindow(input: ValidationInput): PriorRead[] {
+  const start = windowStart(input.capturedAt, input.config.baselineMonths);
+  return input.history.filter((h) => {
+    const t = new Date(h.capturedAt).getTime();
+    return !Number.isNaN(t) && t >= start;
+  });
+}
 
 /**
  * Computes the shared derived context from a read and its history. Baseline is
@@ -9,7 +46,8 @@ import type { Derived, ValidationInput } from './types';
  * rollover reports true wrap usage, everything else reports the signed delta.
  */
 export function derive(input: ValidationInput): Derived {
-  const { value, history, registerDials, config } = input;
+  const { value, registerDials, config } = input;
+  const history = withinWindow(input);
 
   const priorValue = history.length > 0 ? history[history.length - 1]!.value : null;
   const rawDelta = priorValue === null ? null : value - priorValue;

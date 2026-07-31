@@ -47,6 +47,7 @@ suite('invitation claim', () => {
       .insert(users)
       .values({ email, displayName: `Invitee ${email}`, role: 'reader' })
       .returning();
+    if (!row) throw new Error('insert returned no row');
     created.push(row.id);
     return row;
   }
@@ -86,16 +87,12 @@ suite('invitation claim', () => {
 
     expect(a.length + b.length).toBe(1);
     const [row] = await db.select().from(users).where(eq(users.email, email)).limit(1);
-    expect(['neon|racer-a', 'neon|racer-b']).toContain(row.authSub);
+    expect(['neon|racer-a', 'neon|racer-b']).toContain(row?.authSub);
   });
 
   it('matches case-insensitively, because an admin typed the address by hand', async () => {
     const local = `mixed-${randomUUID()}`;
-    const [row] = await db
-      .insert(users)
-      .values({ email: `${local}@example.com`, displayName: 'Mixed Case', role: 'reader' })
-      .returning();
-    created.push(row.id);
+    const row = await invite(`${local}@example.com`);
 
     // The guard lowercases the token claim; the predicate lowercases the column.
     const [claimed] = await claim(db, 'neon|mixed', `${local}@example.com`);
@@ -104,11 +101,7 @@ suite('invitation claim', () => {
 
   it('refuses two invitations for the same address in different cases', async () => {
     const local = `dupe-${randomUUID()}`;
-    const [first] = await db
-      .insert(users)
-      .values({ email: `${local}@example.com`, displayName: 'First', role: 'reader' })
-      .returning();
-    created.push(first.id);
+    await invite(`${local}@example.com`);
 
     // Without the unique index on lower(email), the claim above would have two
     // candidate rows and would pick one arbitrarily.

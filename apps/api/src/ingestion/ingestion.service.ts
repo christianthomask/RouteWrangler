@@ -134,6 +134,7 @@ export class IngestionService {
       lat: ev.lat ?? null,
       lng: ev.lng ?? null,
       registerDials: meter.registerDials,
+      capturedAt: ev.capturedAt,
       history,
       config: this.config,
       duplicate,
@@ -331,10 +332,17 @@ export class IngestionService {
     capturedAt: Date,
     excludeRunStopId?: string | null,
   ): Promise<PriorRead[]> {
+    // The engine re-applies this window itself (`withinWindow` in the baseline
+    // module). The bound is repeated here so a meter with a decade of history
+    // does not ship a decade of rows over the wire to be discarded.
     const cutoff = new Date(capturedAt);
     cutoff.setMonth(cutoff.getMonth() - this.config.baselineMonths);
     const rows = await this.db
-      .select({ value: readEvents.value, consumption: readEvents.consumption })
+      .select({
+        value: readEvents.value,
+        consumption: readEvents.consumption,
+        capturedAt: readEvents.capturedAt,
+      })
       .from(readEvents)
       .where(
         and(
@@ -353,6 +361,10 @@ export class IngestionService {
         ),
       )
       .orderBy(asc(readEvents.capturedAt));
-    return rows.map((r) => ({ value: r.value, consumption: r.consumption }));
+    return rows.map((r) => ({
+      value: r.value,
+      consumption: r.consumption,
+      capturedAt: r.capturedAt.toISOString(),
+    }));
   }
 }

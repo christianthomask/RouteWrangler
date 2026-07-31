@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CycleIdSchema } from './cycle';
 import { ExceptionCodeSchema } from './validation';
 
 /**
@@ -85,6 +86,9 @@ export type ExportCyclesResponse = z.infer<typeof ExportCyclesResponseSchema>;
 /** Materialize the export for a client + cycle. */
 export const RunExportRequestSchema = z.object({
   clientId: z.string().uuid(),
-  cycleId: z.string().min(1),
+  // A cycle id keys the partial unique index that makes supersede work
+  // (ADR-023). A free-form string let `2026-7` open a parallel cycle that no
+  // other query would ever find.
+  cycleId: CycleIdSchema,
 });
 export type RunExportRequest = z.infer<typeof RunExportRequestSchema>;

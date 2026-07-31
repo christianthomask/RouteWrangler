@@ -4,6 +4,8 @@ import type { ExceptionCode, ValidationConfig } from '../validation';
 export interface PriorRead {
   value: number;
   consumption: number | null;
+  /** ISO timestamp of *capture*, not receipt — see `loadHistory` in ingestion. */
+  capturedAt: string;
 }
 
 /** Duplicate context supplied by ingestion when a completed stop is re-read. */
@@ -17,7 +19,17 @@ export interface ValidationInput {
   lat: number | null;
   lng: number | null;
   registerDials: number;
-  /** The meter's prior reads within the baseline window, oldest-first. */
+  /**
+   * ISO timestamp this read was captured at. Required, because it is what the
+   * baseline window is measured back from — without it `config.baselineMonths`
+   * could only be honoured by whoever assembled `history`, and one caller that
+   * forgot would silently average years of readings into the band.
+   */
+  capturedAt: string;
+  /**
+   * The meter's prior reads, oldest-first. May extend beyond the baseline
+   * window: `derive` trims it, so callers need not agree about the window.
+   */
   history: PriorRead[];
   config: ValidationConfig;
   /** Present only when this read lands on an already-completed stop. */

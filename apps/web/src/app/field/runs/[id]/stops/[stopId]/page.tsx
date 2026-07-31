@@ -191,10 +191,15 @@ export default function CapturePage() {
       lat: gps.lat,
       lng: gps.lng,
       registerDials: stop.registerDials,
+      // Captured now, by definition — the reader is standing at the meter. The
+      // engine measures the baseline window back from this and trims anything in
+      // `history` that falls outside it, so this preview and the server's later
+      // verdict are computed over the same reads (ADR-020).
+      capturedAt: new Date().toISOString(),
       // The engine wants oldest-first; the field history arrives most-recent-first.
       history: [...meter.reads]
         .reverse()
-        .map((r) => ({ value: r.value, consumption: r.consumption })),
+        .map((r) => ({ value: r.value, consumption: r.consumption, capturedAt: r.capturedAt })),
       config: DEFAULT_VALIDATION_CONFIG,
     });
     // Only the *reading* is evidenced by a photo of the meter. A missing GPS fix

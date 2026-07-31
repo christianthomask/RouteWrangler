@@ -37,7 +37,7 @@ import {
 } from '../db/schema';
 import { AuditService } from '../audit/audit.service';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
-import { currentCycleId } from '../catalog/catalog.service';
+import { cycleIdForDate } from '@routewrangler/contracts';
 import { validateSplit, type StopLite } from './split';
 
 /**
@@ -180,7 +180,9 @@ export class RunsService {
       .where(eq(clients.id, route.clientId))
       .limit(1);
     const runDate = req.runDate ?? todayIn(client?.timezone || this.env.APP_TIMEZONE);
-    const cycleId = req.cycleId ?? currentCycleId(new Date(runDate));
+    // Derived from the run date, which is already the client's calendar day, so
+    // a run and its cycle can never disagree about which month this is.
+    const cycleId = req.cycleId ?? cycleIdForDate(runDate);
     const runId = randomUUID();
 
     await this.db.insert(routeRuns).values({

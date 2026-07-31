@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CycleIdSchema } from './cycle';
 
 /** Catalog for the assign picker (BUILD_SPEC §7.3, §7.5). */
 export const ClientSummarySchema = z.object({
@@ -31,8 +32,13 @@ export type RouteListResponse = z.infer<typeof RouteListResponseSchema>;
 export const AssignRunRequestSchema = z.object({
   routeId: z.string().uuid(),
   readerId: z.string().uuid(),
-  runDate: z.string().optional(), // yyyy-mm-dd, defaults to today
-  cycleId: z.string().optional(), // defaults to YYYY-MM of runDate
+  /** yyyy-mm-dd; defaults to today in the *client's* zone, never the server's. */
+  runDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a calendar date, YYYY-MM-DD')
+    .optional(),
+  /** Defaults to the calendar month of `runDate`. */
+  cycleId: CycleIdSchema.optional(),
 });
 export type AssignRunRequest = z.infer<typeof AssignRunRequestSchema>;
 
