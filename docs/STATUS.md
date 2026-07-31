@@ -96,7 +96,19 @@ lose a delivery.
 
 **Dev auth bypass** (ADR-012) is hard-disabled in production independently on
 both sides: the API collapses it at config load, and the web fails closed when no
-auth URL is configured in a production build.
+auth URL is configured in a production build. **Verified against the live
+deployment on 2026-07-31**, not just in unit tests: `GET /me` carrying
+`x-dev-user-sub: local-only:admin` — the exact header that grants admin locally —
+answers `503`, and the deployed login page renders "identity provider pending
+setup" rather than the "Continue as …" buttons. This is the property H9 exists
+for, and it is the one worth checking on a real deployment rather than a mock.
+
+**The Cloudflare deployment serves** (ADR-019). Verified 2026-07-31 against the
+live Workers: the API answers `GET /health` with `db:up` — so the beta Containers
+runtime boots, and the container reaches Neon — and the web Worker serves
+`/login`. The 503s above also confirm the *newly built* image is the one running,
+since the message they carry (`set NEON_AUTH_BASE_URL`) only exists in this
+build. Migrations 0010 and 0011 are applied to the production database.
 
 **Staff administration** (ADR-024) behind a `StaffDirectoryPort` with `oidc` and
 `local` adapters, plus withdrawal of an unaccepted invitation.
@@ -112,8 +124,8 @@ labeled as such at its call site.
 
 | Thing | Why unverified | Owner |
 | --- | --- | --- |
-| **Cloudflare deploy end to end** (ADR-019) | **The pipeline ran green for the first time on 2026-07-30** (`cf1b068`): migrations applied to Neon, the API container deployed, the web app built with OpenNext and deployed. That is three jobs exiting zero — it is *not* evidence that the deployed services answer requests. Cloudflare Containers is beta (scale-to-zero, ephemeral disk, no native autoscaling), and nobody has hit the deployed URLs. Fallback still documented — host the root `Dockerfile` on Fly/Render, keep Cloudflare for web + R2. **Next check:** `GET /health` on the deployed API (it is `@Public()`, so it answers without auth). | Dev + CTK |
-| **Neon Auth sign-in** (ADR-027) | The API's verification path is standards-only (`jose` against a JWKS) and unit-tested, but nobody has completed a Google sign-in against a real Neon Auth instance. The automated UAT *cannot* cover this — its scratch environment has no IdP — and says so on every run. **The deployed environment is currently unconfigured for it:** `NEON_AUTH_BASE_URL` (wrangler secret) and `NEXT_PUBLIC_NEON_AUTH_URL` (GitHub repo variable) are new in ADR-027 and replace the Clerk values, so unless they were set by hand after this deploy they are unset. Expect the deployed login page to read "Identity provider pending setup" and authenticated API endpoints to answer a labeled 503 — both are the intended fail-closed behaviour (ADR-012, H9), not a fault. See the runbook §1 and §2. | Dev + CTK |
+| **Cloudflare deploy under real use** (ADR-019) | The deploy itself is **no longer unverified** — see "Shipped and verified" below; both Workers serve. What remains unproven is everything after the first request: sustained operation, behaviour under concurrent load, and whether Containers' scale-to-zero is acceptable in practice. The first cold request took **5.3s** against 1.2s warm, which is the beta caveat ADR-019 predicted, measured. If that is too slow for the field PWA, the documented fallback stands: host the root `Dockerfile` on Fly/Render and keep Cloudflare for web + R2. | Dev + CTK |
+| **Neon Auth sign-in** (ADR-027) | The API's verification path is standards-only (`jose` against a JWKS) and unit-tested, but nobody has completed a Google sign-in against a real Neon Auth instance. The automated UAT *cannot* cover this — its scratch environment has no IdP — and says so on every run. **The deployed environment is confirmed unconfigured for it** (checked 2026-07-31): `NEXT_PUBLIC_NEON_AUTH_URL` is absent from the repo variables, which still carry a now-dead `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, and the API reports `NEON_AUTH_BASE_URL` unset. So the deployed login page reads "identity provider pending setup" and authenticated endpoints answer a labeled 503. That is the system working, not a fault — but it does mean **nobody can sign in to the deployment yet**. Runbook §1 sets the two values; §2 bootstraps the first admin. | Dev + CTK |
 | **`@neondatabase/auth` is 0.4.2-beta** | A beta SDK on the web sign-in and token-refresh path. It also declares a peer dependency on Next ≥ 16 while the app is on 15; nothing imported touches Next and the build is clean, but that compatibility is unproven. The API side would survive the SDK being replaced. | Dev |
 | **PMTiles tile packs** | The client is shipped and works; provisioning the packs to R2 is a manual infra step. Two packs are hardcoded in `apps/web/src/app/tiles/[z]/[x]/[y]/route.ts` (Central Coast, Bend OR). See `docs/runbooks/offline-basemap.md`. **Demo consequence:** with no packs provisioned, `/tiles/{z}/{x}/{y}` answers `204` and the field route map renders as an unzoomed world basemap — which reads as broken rather than as unconfigured. Before a stakeholder session, either provision the packs or set `NEXT_PUBLIC_MAP_STYLE_URL=''` to force the coordinate-plot fallback (ADR-021), which looks deliberate. | Dev |
 

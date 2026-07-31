@@ -111,10 +111,41 @@ remote Claude Code session, whose egress proxy blocks `*.cloudflare.com`.
 4. **Cloudflare API token** — with Workers Scripts + Containers + R2 edit perms;
    note it and your **account id**.
 
+### Deployed URLs
+
+| | URL |
+| --- | --- |
+| API | `https://verameter-api.verameter.workers.dev` |
+| Web | `https://verameter-web.verameter.workers.dev` |
+
+`GET /health` on the API is `@Public()`, so it is the one-request check that the
+container booted and reached the database — no credentials needed:
+
+```bash
+curl https://verameter-api.verameter.workers.dev/health
+# {"status":"ok","service":"routewrangler-api","db":"up"}
+```
+
+Expect the first request after idle to take ~5s: Containers scales to zero
+(ADR-019), so a cold start is paid by whoever asks first. Warm requests are ~1s.
+
 ### GitHub secrets & variables (repo → Settings)
 Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DATABASE_URL`.
 Variables: `NEXT_PUBLIC_API_BASE_URL` (the deployed API URL),
 `NEXT_PUBLIC_NEON_AUTH_URL` (the Auth URL from step 2).
+
+With the `gh` CLI, the two that ADR-027 introduced are:
+
+```bash
+gh variable set NEXT_PUBLIC_NEON_AUTH_URL -R <owner>/RouteWrangler   # web build
+gh variable delete NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY -R <owner>/RouteWrangler
+# and, from apps/api:
+wrangler secret put NEON_AUTH_BASE_URL                                # API runtime
+```
+
+The variable is read at **build** time and the secret at **run** time, so setting
+the variable requires a redeploy of the web Worker to take effect; the secret
+takes effect on the API's next start.
 
 > Leave `NEXT_PUBLIC_NEON_AUTH_URL` unset and the production web build fails
 > closed to "identity provider pending setup" — it never falls back to the dev
