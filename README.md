@@ -28,7 +28,8 @@ apps/web          Next.js (App Router) — /login, /field, /supervisor, /admin
 apps/api          NestJS — ingestion, validation, exceptions, exports, auth
 packages/contracts   Shared Zod schemas — the single source of request/response truth
 packages/simulator   Route simulator — talks ONLY to the public API (no privileged access)
-docs/             Decision log (ADRs), runbook, open questions
+verifier/         Automated UAT — boots the compiled API against a scratch database
+docs/             Decision log (ADRs), runbook, project status
 ```
 
 ## Quick start
@@ -64,7 +65,7 @@ port. The default `.env` runs everything locally — docker Postgres, **MinIO**
 (ADR-012, hard-disabled in production). The production target is **Cloudflare**
 (Neon Auth · Neon Postgres · R2 · Workers), selected by `NEON_AUTH_BASE_URL` /
 `S3_BUCKET` / `DATABASE_URL` — see the portability map in `docs/runbook.md`.
-AWS and Azure are parked (ADR-027): the ports remain, the provider code is out
+AWS and Azure are parked (ADR-026): the ports remain, the provider code is out
 of the tree.
 
 ## What works today
@@ -90,18 +91,26 @@ Sprints 0–4 are shipped. The headline capabilities:
   re-served rather than re-rendered; supersede is transactional.
 - **Skips carry evidence** (ADR-025) — reason plus a photograph, enforced
   server-side, raising a reviewable exception against the stop.
-- **Auth** — Neon Auth (managed Better Auth) behind a generic OIDC verifier
-  that derives issuer, JWKS and audience from one base URL, with roles
-  **DB-authoritative** (never read from the token). Invitations are pending
-  roster rows, linked automatically on first verified sign-in — no webhook
-  (ADR-027).
+- **Auth** (ADR-027) — Neon Auth (managed Better Auth) behind a generic OIDC
+  verifier that derives issuer, JWKS and audience from one base URL, with roles
+  **DB-authoritative** (never read from the token). Google is the only sign-in
+  method. An invitation is a `users` row with an email and no subject id; the
+  auth guard attaches the identity on that person's first verified sign-in, so
+  there is no webhook that can lose a delivery.
 - **Simulator** — deterministic seasonal generation, playback through the public
   API with zero privileged access, and an anomaly matrix that trips every rule.
 
-**173 tests** across API, contracts, web and simulator, plus a versioned
-verifier (`verifier/`) whose automated UAT drives the compiled API and
-simulator against a scratch database end to end. CI runs build, lint,
-typecheck, migrations and the full suite against a real Postgres.
+**198 tests** across API, contracts, web and simulator, plus **19 UAT scenarios**
+in the versioned [`verifier/`](./verifier/README.md), which creates a scratch
+database, boots the compiled API against it, and drives the whole system over
+HTTP — simulator included, as an ordinary API client. It found two defects on
+its first run that no unit test could see, and it prints what it did *not* prove
+at the end of every run. CI runs build, lint, typecheck, migrations, the full
+suite and the UAT against a real Postgres.
+
+```bash
+pnpm -r build && pnpm uat    # the pre-flight before showing anyone the product
+```
 
 **Demo:** simulator → public API → validated reads + typed exceptions in the
 database. *"The pipeline works end to end with no UI."*
