@@ -88,6 +88,30 @@ describe('loadEnv — staff provider', () => {
   });
 });
 
+describe('loadEnv — empty means unset', () => {
+  it('boots from a .env.example copied verbatim, blanks and all', () => {
+    // The template lists every optional setting with an empty value as
+    // documentation. dotenv turns those into '', and to zod an empty string is
+    // a present string that fails .url() — so the checked-in template used to
+    // refuse to boot.
+    const env = loadEnv({
+      ...base,
+      NEON_AUTH_BASE_URL: '',
+      OIDC_ISSUER: '',
+      OIDC_JWKS_URI: '',
+      S3_ENDPOINT: '',
+    } as NodeJS.ProcessEnv);
+    expect(env.authConfigured).toBe(false);
+    expect(env.oidc).toBeUndefined();
+  });
+
+  it('an empty value does not override a schema default', () => {
+    expect(loadEnv({ ...base, APP_TIMEZONE: '' } as NodeJS.ProcessEnv).APP_TIMEZONE).toBe(
+      'America/Los_Angeles',
+    );
+  });
+});
+
 describe('loadEnv — dev bypass', () => {
   it('collapses in production regardless of the flag (ADR-012, H9)', () => {
     const env = loadEnv({

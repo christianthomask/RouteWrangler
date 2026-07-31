@@ -196,6 +196,31 @@ importers:
         specifier: ^3.0.2
         version: 3.2.7(@types/node@22.20.1)(terser@5.49.0)(tsx@4.23.1)(yaml@2.9.0)
 
+  verifier:
+    dependencies:
+      '@routewrangler/contracts':
+        specifier: workspace:*
+        version: link:../packages/contracts
+      '@routewrangler/simulator':
+        specifier: workspace:*
+        version: link:../packages/simulator
+      postgres:
+        specifier: ^3.4.5
+        version: 3.4.9
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.1
+      eslint:
+        specifier: ^9.18.0
+        version: 9.39.5
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.1
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
 packages:
 
   '@angular-devkit/core@19.2.24':

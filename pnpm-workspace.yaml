@@ -1,3 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # The automated UAT (see verifier/README.md). A workspace package so it can
+  # import the contracts and the simulator, but never part of `pnpm test` — it
+  # boots a server against a scratch database and takes tens of seconds.
+  - "verifier"

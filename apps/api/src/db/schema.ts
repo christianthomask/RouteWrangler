@@ -390,7 +390,16 @@ export const exportRuns = pgTable(
     // future object-storage offload of large bodies — ADR-023).
     body: text('body'),
     fileKey: text('file_key'),
-    // Self-reference: the export run that replaced this one (ADR-023).
+    /**
+     * Self-reference: the export run that replaced this one (ADR-023).
+     *
+     * The constraint is **DEFERRABLE INITIALLY DEFERRED** in the database
+     * (migration 0011), which drizzle's DSL cannot express, so it is not visible
+     * here. It has to be: superseding marks the current row as replaced by the
+     * row that is about to be inserted, and the partial unique index below
+     * forbids doing the insert first. Deferral is what lets the reference be
+     * dangling between the two statements and correct at COMMIT.
+     */
     supersededByRunId: uuid('superseded_by_run_id').references(
       (): AnyPgColumn => exportRuns.id,
       { onDelete: 'set null' },

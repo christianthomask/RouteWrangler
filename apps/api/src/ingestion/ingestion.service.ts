@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, asc, eq, gte, isNull, lt, ne, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lt, ne, notInArray, or, sql } from 'drizzle-orm';
 import {
   DEFAULT_VALIDATION_CONFIG,
   registerMax,
@@ -356,8 +356,18 @@ export class IngestionService {
            * differences to ~0, which made a re-read of a flagged meter look
            * clean and billable, and made a corrected value nonsense. The true
            * comparison is the previous cycle's read.
+           *
+           * The `IS NULL` half is load-bearing, not defensive. `run_stop_id <> $1`
+           * evaluates to NULL — and so filters out — every row where the column
+           * is NULL, which is every read not captured against a run stop: all
+           * imported and back-filled history. Without it this query returned
+           * nothing for an ordinary field read, the engine saw no prior value,
+           * and no consumption rule could fire at all. Nothing failed loudly;
+           * reads simply came back clean and billable with a null consumption.
            */
-          excludeRunStopId ? ne(readEvents.runStopId, excludeRunStopId) : undefined,
+          excludeRunStopId
+            ? or(isNull(readEvents.runStopId), ne(readEvents.runStopId, excludeRunStopId))
+            : undefined,
         ),
       )
       .orderBy(asc(readEvents.capturedAt));

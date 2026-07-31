@@ -238,6 +238,48 @@ suite('run stop read of record (integration)', () => {
     lng: -120.1,
   });
 
+  it('builds a baseline from history that predates run stops', async () => {
+    /*
+     * Regression, found by the automated UAT (verifier/). Excluding earlier
+     * reads of the same stop was written as `run_stop_id <> $1`, and in SQL that
+     * is NULL — and so not true — for every row where the column is NULL: all
+     * imported and back-filled history. The query returned nothing for any
+     * ordinary field read, the engine saw no prior value, and no consumption
+     * rule could fire. Nothing errored. Reads came back clean, billable, and
+     * with a null consumption, which from a distance is what a working system
+     * also looks like.
+     */
+    const f = await fixture();
+    const actor = { id: f.readerId, role: 'reader' as const };
+
+    // Four months of steady 100/cycle history, none of it tied to a run stop.
+    for (let i = 0; i < 4; i++) {
+      const at = new Date(`2026-0${3 + i}-18T10:00:00.000Z`);
+      await db.insert(readEvents).values({
+        id: randomUUID(),
+        meterId: f.meterId,
+        runStopId: null,
+        readerId: f.readerId,
+        value: 1000 + i * 100,
+        consumption: 100,
+        capturedAt: at,
+        receivedAt: at,
+        sourceType: 'manual',
+        billable: true,
+      });
+    }
+
+    // 4× the baseline, captured against the run stop.
+    const res = await svc.ingest({ events: [read(f, 1700, '2026-07-18T10:00:00.000Z')] }, actor);
+
+    expect(res.results[0]?.exceptions).toContain('high_read');
+    const [stored] = await db
+      .select()
+      .from(readEvents)
+      .where(eq(readEvents.id, res.results[0]!.id));
+    expect(stored?.consumption).toBe(400);
+  });
+
   it('a corrected read becomes the stop read of record', async () => {
     const f = await fixture();
     const actor = { id: f.readerId, role: 'reader' as const };

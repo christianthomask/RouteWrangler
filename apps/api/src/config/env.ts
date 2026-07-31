@@ -121,7 +121,16 @@ function resolveOidc(p: z.infer<typeof EnvSchema>): OidcConfig | undefined {
 }
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  const parsed = EnvSchema.parse(source);
+  /*
+   * An empty value means "not set". dotenv turns `OIDC_ISSUER=` into `''`, and
+   * to zod an empty string is a present string that fails `.url()` — so copying
+   * the checked-in `.env.example`, which lists every optional setting with an
+   * empty value as documentation, refused to boot at all. Stripping them here
+   * makes the template work as written, and makes `KEY=` mean the same thing as
+   * omitting the line.
+   */
+  const present = Object.fromEntries(Object.entries(source).filter(([, v]) => v !== ''));
+  const parsed = EnvSchema.parse(present);
   const oidc = resolveOidc(parsed);
   return {
     ...parsed,

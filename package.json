@@ -19,6 +19,7 @@
     "db:migrate": "pnpm --filter @routewrangler/api db:migrate",
     "db:check": "pnpm --filter @routewrangler/api db:check",
     "seed": "pnpm --filter @routewrangler/api seed",
+    "uat": "pnpm --filter @routewrangler/verifier uat",
     "dev": "pnpm --filter @routewrangler/api dev",
     "format": "prettier --write ."
   },

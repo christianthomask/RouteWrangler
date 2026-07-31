@@ -19,17 +19,25 @@ import { seedWorld } from './world';
  * cannot do on their behalf. Seeding a deployed environment means seeding the
  * world and inviting the staff through Admin (ADR-027).
  */
-async function main() {
-  const env = loadEnv();
+export interface SeedResult {
+  readerSub: string;
+  meterCount: number;
+  readCount: number;
+  demoRunId: string;
+}
 
-  console.log(
-    env.authDevBypass
-      ? 'Seeding users with local-only subjects (dev-auth shim is on — they can sign in)'
-      : 'Seeding users with local-only subjects — NOTE: no IdP identity is attached,\n' +
-          '  so nobody can sign in as them. Invite real staff through Admin → Staff.',
-  );
-
-  const { db, sql } = createDb(env.DATABASE_URL);
+/**
+ * Exported so the automated UAT can seed its scratch database in-process rather
+ * than shelling out to a package manager. Takes the connection string as an
+ * argument for the same reason: the caller decides which database this lands in,
+ * and a UAT that inherited DATABASE_URL from the ambient environment would be
+ * one stale shell away from rebuilding the dev database.
+ */
+export async function seed(
+  databaseUrl: string,
+  log: (line: string) => void = console.log,
+): Promise<SeedResult> {
+  const { db, sql } = createDb(databaseUrl);
   try {
     // 1) Users.
     const subs = new Map<string, string>();
@@ -53,7 +61,7 @@ async function main() {
             updatedAt: new Date(),
           },
         });
-      console.log(`  ✓ ${user.role.padEnd(10)} ${user.displayName} (${sub})`);
+      log(`  ✓ ${user.role.padEnd(10)} ${user.displayName} (${sub})`);
     }
 
     // Resolve the reader's local id (owner of runs + historical reads).
@@ -63,23 +71,39 @@ async function main() {
 
     // 2) Taxonomy lookups (labels are data; rules are code — ADR-003).
     await seedTaxonomy(db);
-    console.log('  ✓ taxonomy (severities, exception types, skip reasons)');
+    log('  ✓ taxonomy (severities, exception types, skip reasons)');
 
     // 3) The world + 12-month history + today's demo run.
     const world = await seedWorld(db, reader.id, new Date());
-    console.log(
-      `  ✓ world: ${world.meterCount} meters, ${world.readCount} historical reads across 3 clients`,
-    );
-    console.log(`  ✓ demo run ${world.demoRunId} (open, assigned to ${reader.displayName})`);
+    log(`  ✓ world: ${world.meterCount} meters, ${world.readCount} historical reads across 3 clients`);
+    log(`  ✓ demo run ${world.demoRunId} (open, assigned to ${reader.displayName})`);
 
-    console.log('\nSeed complete. Run the pipeline with:');
-    console.log(`  SIM_READER_SUB='${readerSub}' pnpm --filter @routewrangler/simulator playback`);
+    return { readerSub, ...world };
   } finally {
     await sql.end();
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+async function main() {
+  const env = loadEnv();
+
+  console.log(
+    env.authDevBypass
+      ? 'Seeding users with local-only subjects (dev-auth shim is on — they can sign in)'
+      : 'Seeding users with local-only subjects — NOTE: no IdP identity is attached,\n' +
+          '  so nobody can sign in as them. Invite real staff through Admin → Staff.',
+  );
+
+  const { readerSub } = await seed(env.DATABASE_URL);
+
+  console.log('\nSeed complete. Run the pipeline with:');
+  console.log(`  SIM_READER_SUB='${readerSub}' pnpm --filter @routewrangler/simulator playback`);
+}
+
+// Only when run as a script — the UAT imports `seed` directly (verifier/).
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

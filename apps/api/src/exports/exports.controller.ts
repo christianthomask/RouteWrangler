@@ -53,8 +53,12 @@ export class ExportsController {
 
   @Post()
   run(@Body() body: unknown, @CurrentUser() user: AuthUser): Promise<ExportRunView> {
-    const req = RunExportRequestSchema.parse(body);
-    return this.exports.run(req.clientId, req.cycleId, user);
+    // safeParse, not parse: a bare ZodError escapes as a 500, so a mistyped
+    // cycle id read as "the export service is broken" rather than "that is not
+    // a cycle". Every other controller in this API validates this way.
+    const parsed = RunExportRequestSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.exports.run(parsed.data.clientId, parsed.data.cycleId, user);
   }
 
   @Get(':id/download')

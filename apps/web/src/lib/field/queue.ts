@@ -56,7 +56,11 @@ async function uploadPhoto(
     body: JSON.stringify({ ...target, contentType }),
   });
   if (!presign.ok) throw new Error(`presign ${presign.status}`);
-  const { uploadUrl, headers: putHeaders, photoKey } = (await presign.json()) as {
+  const {
+    uploadUrl,
+    headers: putHeaders,
+    photoKey,
+  } = (await presign.json()) as {
     uploadUrl: string;
     headers: Record<string, string>;
     photoKey: string;
@@ -66,7 +70,13 @@ async function uploadPhoto(
   return photoKey;
 }
 
-class FieldQueue {
+/**
+ * Exported for tests. The app uses the `fieldQueue` singleton below — a second
+ * instance would mean two mirrors of one IndexedDB store — but the tests need a
+ * fresh queue per case, since `loaded` and the sequence counter are per-instance
+ * state that outlives an individual scenario.
+ */
+export class FieldQueue {
   private mirror: QueuedAction[] = [];
   private listeners = new Set<() => void>();
   private loaded = false;
@@ -178,97 +188,141 @@ class FieldQueue {
     return id;
   }
 
-  async sync(): Promise<void> {
-    if (this.syncing) return;
+  /**
+   * The pass currently running, so a concurrent caller waits for it instead of
+   * being told "already syncing" and returning to a queue that is still full.
+   */
+  private inFlight: Promise<void> | null = null;
+  /** Set when a sync is requested while one is running — see `drain`. */
+  private resyncRequested = false;
+
+  /**
+   * Drain the queue. Resolves when the queue is quiet, whether this call started
+   * the pass or joined one already running.
+   *
+   * The join matters: `enqueueRead` fires a sync of its own, so two captures a
+   * few hundred milliseconds apart used to have the second one's sync return
+   * immediately — and the pass already in flight had computed its work list
+   * before that capture existed. The read then sat `pending` until something
+   * else happened to trigger a sync, which offline is exactly when nothing does.
+   */
+  sync(): Promise<void> {
+    if (this.inFlight) {
+      this.resyncRequested = true;
+      return this.inFlight;
+    }
+    this.inFlight = this.drain().finally(() => {
+      this.inFlight = null;
+    });
+    return this.inFlight;
+  }
+
+  private async drain(): Promise<void> {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     const headers = authHeaders();
     if (!headers) return;
 
     this.syncing = true;
     try {
-      for (const a of syncable(this.mirror)) {
-        await this.persist({ ...a, state: 'syncing', error: undefined });
-        try {
-          if (a.kind === 'read' && a.read) {
-            const event = {
-              id: a.id, // client-generated id = idempotency key
-              meterId: a.read.meterId,
-              runStopId: a.read.runStopId,
-              readerId: a.read.readerId,
-              value: a.read.value,
-              capturedAt: a.read.capturedAt,
-              sourceType: 'manual' as const,
-              lat: a.read.lat,
-              lng: a.read.lng,
-              note: a.read.note ?? undefined,
-              exceptionId: a.read.exceptionId ?? undefined,
-            };
-            const res = await fetch(`${config.apiBaseUrl}/ingest/read-events`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json', ...headers },
-              body: JSON.stringify({ events: [event] }),
-            });
-            if (!res.ok) throw new Error(`ingest ${res.status}`);
-            const json = await res.json();
-            const status = json?.results?.[0]?.status ?? 'rejected';
-            const landed = stateFromIngest(status);
-            // Keep the server's reason. A rejected read ("value exceeds register
-            // capacity") otherwise left the reader with a bare "failed" count and
-            // nothing to act on — they walked away believing the stop was done.
-            const reason: string | undefined = json?.results?.[0]?.message;
-            await this.persist({
-              ...a,
-              state: landed,
-              error: landed === 'failed' ? (reason ?? 'the server rejected this read') : undefined,
-            });
-
-            // Photo attaches after the read lands (H6, best-effort — the read is
-            // never blocked by it). On success we drop the local data URL to free
-            // IndexedDB. On failure the read stays synced; the photo is left in
-            // place (not auto-retried, since synced actions aren't re-sent) and
-            // is reclaimed on the next session's prune.
-            if (landed === 'synced' && a.read.photoDataUrl) {
-              try {
-                await uploadPhoto({ readEventId: a.id }, a.read.photoDataUrl, headers);
-                await this.persist({ ...a, state: 'synced', read: { ...a.read, photoDataUrl: null } });
-              } catch {
-                /* read is safe; photo upload is best-effort */
-              }
-            }
-          } else if (a.kind === 'skip' && a.skip) {
-            /*
-             * The photo goes up FIRST, because the server refuses a skip without
-             * one. That means a skip needing evidence cannot be recorded while
-             * offline — it stays queued until there is a connection, which is
-             * the honest outcome: the evidence is the point, and a skip that
-             * landed without it would be exactly the gap this closes.
-             */
-            let photoKey: string | undefined;
-            if (a.skip.photoDataUrl) {
-              photoKey = await uploadPhoto({ runStopId: a.skip.stopId }, a.skip.photoDataUrl, headers);
-            }
-            const res = await fetch(
-              `${config.apiBaseUrl}/runs/${a.skip.runId}/stops/${a.skip.stopId}/skip`,
-              {
-                method: 'POST',
-                headers: { 'content-type': 'application/json', ...headers },
-                body: JSON.stringify({ skipReasonCode: a.skip.skipReasonCode, photoKey }),
-              },
-            );
-            if (!res.ok) throw new Error(`skip ${res.status}`);
-            await this.persist({ ...a, state: 'synced' });
-          }
-        } catch (e) {
-          await this.persist({
-            ...a,
-            state: 'failed',
-            error: e instanceof Error ? e.message : 'sync failed',
-          });
-        }
-      }
+      do {
+        this.resyncRequested = false;
+        await this.pass(headers);
+      } while (this.resyncRequested);
     } finally {
       this.syncing = false;
       this.emit();
+    }
+  }
+
+  /** One traversal of everything currently sendable, in capture order. */
+  private async pass(headers: Record<string, string>): Promise<void> {
+    for (const a of syncable(this.mirror)) {
+      await this.persist({ ...a, state: 'syncing', error: undefined });
+      try {
+        if (a.kind === 'read' && a.read) {
+          const event = {
+            id: a.id, // client-generated id = idempotency key
+            meterId: a.read.meterId,
+            runStopId: a.read.runStopId,
+            readerId: a.read.readerId,
+            value: a.read.value,
+            capturedAt: a.read.capturedAt,
+            sourceType: 'manual' as const,
+            lat: a.read.lat,
+            lng: a.read.lng,
+            note: a.read.note ?? undefined,
+            exceptionId: a.read.exceptionId ?? undefined,
+          };
+          const res = await fetch(`${config.apiBaseUrl}/ingest/read-events`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...headers },
+            body: JSON.stringify({ events: [event] }),
+          });
+          if (!res.ok) throw new Error(`ingest ${res.status}`);
+          const json = await res.json();
+          const status = json?.results?.[0]?.status ?? 'rejected';
+          const landed = stateFromIngest(status);
+          // Keep the server's reason. A rejected read ("value exceeds register
+          // capacity") otherwise left the reader with a bare "failed" count and
+          // nothing to act on — they walked away believing the stop was done.
+          const reason: string | undefined = json?.results?.[0]?.message;
+          await this.persist({
+            ...a,
+            state: landed,
+            error: landed === 'failed' ? (reason ?? 'the server rejected this read') : undefined,
+          });
+
+          // Photo attaches after the read lands (H6, best-effort — the read is
+          // never blocked by it). On success we drop the local data URL to free
+          // IndexedDB. On failure the read stays synced; the photo is left in
+          // place (not auto-retried, since synced actions aren't re-sent) and
+          // is reclaimed on the next session's prune.
+          if (landed === 'synced' && a.read.photoDataUrl) {
+            try {
+              await uploadPhoto({ readEventId: a.id }, a.read.photoDataUrl, headers);
+              await this.persist({
+                ...a,
+                state: 'synced',
+                read: { ...a.read, photoDataUrl: null },
+              });
+            } catch {
+              /* read is safe; photo upload is best-effort */
+            }
+          }
+        } else if (a.kind === 'skip' && a.skip) {
+          /*
+           * The photo goes up FIRST, because the server refuses a skip without
+           * one. That means a skip needing evidence cannot be recorded while
+           * offline — it stays queued until there is a connection, which is
+           * the honest outcome: the evidence is the point, and a skip that
+           * landed without it would be exactly the gap this closes.
+           */
+          let photoKey: string | undefined;
+          if (a.skip.photoDataUrl) {
+            photoKey = await uploadPhoto(
+              { runStopId: a.skip.stopId },
+              a.skip.photoDataUrl,
+              headers,
+            );
+          }
+          const res = await fetch(
+            `${config.apiBaseUrl}/runs/${a.skip.runId}/stops/${a.skip.stopId}/skip`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', ...headers },
+              body: JSON.stringify({ skipReasonCode: a.skip.skipReasonCode, photoKey }),
+            },
+          );
+          if (!res.ok) throw new Error(`skip ${res.status}`);
+          await this.persist({ ...a, state: 'synced' });
+        }
+      } catch (e) {
+        await this.persist({
+          ...a,
+          state: 'failed',
+          error: e instanceof Error ? e.message : 'sync failed',
+        });
+      }
     }
   }
 }

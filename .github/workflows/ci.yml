@@ -59,3 +59,12 @@ jobs:
       # Runs after migrate so the DB-backed integration tests have their schema.
       - name: Unit + integration tests
         run: pnpm -r test
+
+      # The automated UAT — end to end over HTTP against a scratch database it
+      # creates and drops itself (verifier/README.md). It runs here because the
+      # two defects it caught on its first run were both invisible to unit
+      # tests: a baseline query that returned nothing for any real field read,
+      # and a supersede that could never commit. Each looked correct in
+      # isolation; only the whole path showed otherwise.
+      - name: Automated UAT
+        run: pnpm uat
